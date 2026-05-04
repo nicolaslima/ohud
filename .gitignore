@@ -1,0 +1,59 @@
+# Build artifacts
+dist/
+
+# Environment
+.env
+
+# Node.js
+node_modules/
+__pycache__/
+# OS files
+.DS_Store
+
+# Project-specific
+*.lixo.md
+*.sqlite
+paste/.db_SUPPORT/
+paste/data/outputs/
+paste/db/
+paste/embeddings-cache.sqlite
+
+# Python
+.venv/
+
+# Worktrees
+.worktrees
+opensrc/
+tmp/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev-debug.log
+# Dependency directories
+# Environment variables
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# OS specific
+
+# Task files
+tasks.json
+tasks/
+opensrc/
+draft.prompt.md
+.gstack/
+
+.remember/
+.playwright-mcp/
+
+# OMC runtime state
+.omc/
