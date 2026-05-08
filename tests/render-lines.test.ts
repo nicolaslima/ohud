@@ -13,6 +13,7 @@ import { renderAgents } from "../src/render/lines/agents.js";
 import { renderTodos } from "../src/render/lines/todos.js";
 import { renderEnvironment } from "../src/render/lines/environment.js";
 import { renderMemory } from "../src/render/lines/memory.js";
+import { renderDuration } from "../src/render/lines/duration.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 
@@ -243,4 +244,20 @@ test("memory line renders when memoryInfo provided", () => {
   const out = renderMemory(ctx);
   expect(out).toContain("RAM");
   expect(out).toContain("38%");
+});
+
+test("duration line shows session time", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  stdin.cost = { total_duration_ms: 5 * 60_000 };
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showDuration = true;
+  const out = renderDuration(ctx);
+  expect(out).toContain("⏱");
+  expect(out).toContain("5m");
+});
+
+test("duration line null when toggle off", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  expect(renderDuration(ctx)).toBeNull();
 });
