@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderProject } from "../src/render/lines/project.js";
 import { renderContext } from "../src/render/lines/context.js";
+import { renderApiTime } from "../src/render/lines/api-time.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 
@@ -46,4 +47,27 @@ test("context line — empty when used_percentage missing", () => {
   const stdin: StdinData = { context_window: {} };
   const out = renderContext(makeCtx(stdin, "anthropic"));
   expect(out).toBeNull();
+});
+
+test("api-time line in ollama mode with totalDurationNs", () => {
+  const stdin = fx("stdin-ollama-cloud.json");
+  const ctx = makeCtx(stdin, "ollama");
+  ctx.transcript.totalDurationNs = 12 * 60 * 1_000_000_000 + 30 * 1_000_000_000;
+  const out = renderApiTime(ctx);
+  expect(out).toContain("GPU");
+  expect(out).toContain("12m 30s");
+});
+
+test("api-time line falls back to API time when transcript empty", () => {
+  const stdin = fx("stdin-ollama-cloud.json");
+  const ctx = makeCtx(stdin, "ollama");
+  ctx.stdin.cost = { total_api_duration_ms: 75_000 };
+  const out = renderApiTime(ctx);
+  expect(out).toContain("API");
+  expect(out).toContain("1m 15s");
+});
+
+test("api-time line null in anthropic mode", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  expect(renderApiTime(makeCtx(stdin, "anthropic"))).toBeNull();
 });
