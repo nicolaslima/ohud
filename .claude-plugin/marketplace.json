@@ -1,0 +1,20 @@
+{
+  "name": "ohud",
+  "owner": {
+    "name": "nicolaslima",
+    "email": "lima.nicolasmateus@gmail.com"
+  },
+  "metadata": {
+    "description": "Statusline HUD for Claude Code with auto-detected Ollama Cloud / Anthropic dual-mode",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "ohud",
+      "source": "./",
+      "description": "Real-time statusline HUD for Claude Code. Detects Ollama Cloud vs Anthropic mode automatically and renders the appropriate metrics.",
+      "category": "monitoring",
+      "tags": ["hud", "statusline", "ollama", "ollama-cloud", "monitoring"]
+    }
+  ]
+}

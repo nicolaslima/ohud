@@ -1,0 +1,18 @@
+{
+  "name": "ohud",
+  "description": "Real-time statusline HUD for Claude Code with Ollama Cloud + Anthropic dual-mode rendering",
+  "version": "0.1.0",
+  "author": {
+    "name": "nicolaslima",
+    "url": "https://github.com/nicolaslima"
+  },
+  "commands": [
+    "./commands/ohud.md",
+    "./commands/ohud-setup.md",
+    "./commands/ohud-configure.md"
+  ],
+  "homepage": "https://github.com/nicolaslima/ohud",
+  "repository": "https://github.com/nicolaslima/ohud",
+  "license": "MIT",
+  "keywords": ["hud", "statusline", "ollama", "ollama-cloud", "claude-code", "monitoring"]
+}
