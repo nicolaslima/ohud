@@ -1,0 +1,8 @@
+{
+  "session_id": "test-session-ollama",
+  "transcript_path": "/tmp/no-such",
+  "model": { "id": "glm-5:cloud", "display_name": "glm-5:cloud" },
+  "workspace": { "current_dir": "/Users/lima/Projects/ohud", "project_dir": "/Users/lima/Projects/ohud" },
+  "context_window": { "context_window_size": 128000, "used_percentage": 45 },
+  "version": "2.1.90"
+}

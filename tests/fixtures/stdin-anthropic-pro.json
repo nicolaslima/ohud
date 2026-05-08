@@ -1,0 +1,13 @@
+{
+  "session_id": "test-session-anth",
+  "transcript_path": "/tmp/no-such",
+  "model": { "id": "claude-opus-4-7", "display_name": "Opus 4.7" },
+  "workspace": { "current_dir": "/Users/lima/Projects/ohud", "project_dir": "/Users/lima/Projects/ohud" },
+  "context_window": { "context_window_size": 200000, "used_percentage": 45 },
+  "cost": { "total_cost_usd": 0.42, "total_duration_ms": 60000 },
+  "rate_limits": {
+    "five_hour": { "used_percentage": 25, "resets_at": 1738425600 },
+    "seven_day": { "used_percentage": 41, "resets_at": 1738857600 }
+  },
+  "version": "2.1.90"
+}
