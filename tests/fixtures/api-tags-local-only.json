@@ -1,0 +1,11 @@
+{
+  "models": [
+    {
+      "name": "llama3.2:latest",
+      "model": "llama3.2:latest",
+      "size": 2019393189,
+      "digest": "ghi789",
+      "details": { "family": "llama", "parameter_size": "3B", "quantization_level": "Q4_0" }
+    }
+  ]
+}

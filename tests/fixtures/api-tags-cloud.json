@@ -1,0 +1,38 @@
+{
+  "models": [
+    {
+      "name": "glm-5:cloud",
+      "model": "glm-5:cloud",
+      "remote_model": "glm-5",
+      "remote_host": "https://ollama.com:443",
+      "size": 323,
+      "digest": "abc123",
+      "details": {
+        "family": "",
+        "parameter_size": "1T",
+        "quantization_level": "int4"
+      }
+    },
+    {
+      "name": "qwen3-coder-next:cloud",
+      "model": "qwen3-coder-next:cloud",
+      "remote_model": "qwen3-coder-next",
+      "remote_host": "https://ollama.com:443",
+      "size": 382,
+      "digest": "def456",
+      "details": {
+        "family": "qwen3next",
+        "families": ["qwen3next"],
+        "parameter_size": "80B",
+        "quantization_level": "FP8"
+      }
+    },
+    {
+      "name": "llama3.2:latest",
+      "model": "llama3.2:latest",
+      "size": 2019393189,
+      "digest": "ghi789",
+      "details": { "family": "llama", "parameter_size": "3B", "quantization_level": "Q4_0" }
+    }
+  ]
+}
