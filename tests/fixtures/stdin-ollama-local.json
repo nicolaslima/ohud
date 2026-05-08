@@ -1,0 +1,7 @@
+{
+  "session_id": "ollama-local",
+  "transcript_path": "/tmp/no-such",
+  "model": { "id": "llama3.2:latest", "display_name": "llama3.2:latest" },
+  "workspace": { "current_dir": "/Users/lima/Projects/ohud" },
+  "context_window": { "context_window_size": 32768, "used_percentage": 5 }
+}
