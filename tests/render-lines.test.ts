@@ -8,6 +8,7 @@ import { renderApiTime } from "../src/render/lines/api-time.js";
 import { renderUsage } from "../src/render/lines/usage.js";
 import { renderCost } from "../src/render/lines/cost.js";
 import { renderPromptCache } from "../src/render/lines/prompt-cache.js";
+import { renderTools } from "../src/render/lines/tools.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 
@@ -144,4 +145,26 @@ test("prompt cache line null in ollama mode", () => {
   const ctx = makeCtx(stdin, "ollama");
   ctx.config.display.showPromptCache = true;
   expect(renderPromptCache(ctx)).toBeNull();
+});
+
+test("tools line shows running and counts of completed", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTools = true;
+  ctx.transcript.tools = [
+    { id: "1", name: "Edit", target: "auth.ts", status: "running", startTime: new Date() },
+    { id: "2", name: "Read", status: "completed", startTime: new Date() },
+    { id: "3", name: "Read", status: "completed", startTime: new Date() },
+    { id: "4", name: "Read", status: "completed", startTime: new Date() },
+  ];
+  const out = renderTools(ctx);
+  expect(out).toContain("Edit");
+  expect(out).toContain("auth.ts");
+  expect(out).toContain("Read ×3");
+});
+
+test("tools line null when toggle off", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  expect(renderTools(ctx)).toBeNull();
 });
