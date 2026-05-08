@@ -11,6 +11,7 @@ import { renderPromptCache } from "../src/render/lines/prompt-cache.js";
 import { renderTools } from "../src/render/lines/tools.js";
 import { renderAgents } from "../src/render/lines/agents.js";
 import { renderTodos } from "../src/render/lines/todos.js";
+import { renderEnvironment } from "../src/render/lines/environment.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 
@@ -210,4 +211,19 @@ test("todos line null when no todos", () => {
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showTodos = true;
   expect(renderTodos(ctx)).toBeNull();
+});
+
+test("environment line null when toggle off", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  expect(renderEnvironment(ctx)).toBeNull();
+});
+
+test("environment line shows zero when nothing found", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  stdin.workspace = { current_dir: "/tmp/nonexistent-dir-for-test" };
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showConfigCounts = true;
+  const out = renderEnvironment(ctx);
+  expect(out).toContain("CLAUDE.md");
 });
