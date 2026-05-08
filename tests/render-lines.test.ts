@@ -261,3 +261,25 @@ test("duration line null when toggle off", () => {
   const ctx = makeCtx(stdin, "anthropic");
   expect(renderDuration(ctx)).toBeNull();
 });
+
+// Integration tests for render orchestrator
+import { render } from "../src/render/index.js";
+
+test("render orchestrator emits multi-line output for ollama mode", () => {
+  const stdin = fx("stdin-ollama-cloud.json");
+  const ctx = makeCtx(stdin, "ollama");
+  ctx.transcript.totalDurationNs = 120_000_000_000;
+  const out = render(ctx);
+  expect(out.split("\n").length).toBeGreaterThanOrEqual(2);
+  expect(out).toContain("Context");
+  expect(out).toContain("GPU");
+});
+
+test("render orchestrator falls back to anthropic mode", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.usageData = { fiveHour: 25, sevenDay: 41, fiveHourResetAt: null, sevenDayResetAt: null };
+  const out = render(ctx);
+  expect(out).toContain("Context");
+  expect(out).toContain("Usage");
+});
