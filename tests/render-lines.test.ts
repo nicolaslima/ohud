@@ -3,6 +3,7 @@ import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderProject } from "../src/render/lines/project.js";
+import { renderContext } from "../src/render/lines/context.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 
@@ -32,4 +33,17 @@ test("project line — anthropic mode", () => {
   const out = renderProject(makeCtx(stdin, "anthropic"));
   expect(out).toContain("Opus");
   expect(out).toContain("ohud");
+});
+
+test("context line — under threshold", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const out = renderContext(makeCtx(stdin, "anthropic"));
+  expect(out).toContain("Context");
+  expect(out).toContain("45%");
+});
+
+test("context line — empty when used_percentage missing", () => {
+  const stdin: StdinData = { context_window: {} };
+  const out = renderContext(makeCtx(stdin, "anthropic"));
+  expect(out).toBeNull();
 });
