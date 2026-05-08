@@ -48,6 +48,12 @@ export interface StdinWorkspace {
   git_worktree?: string;
 }
 
+// Claude Code 2.1.115+ exposes effort as an object: `{ level: "max" }`.
+// Earlier versions (≤2.1.114) did not send this field at all. The bare-string
+// shape is preserved for backward compatibility with intermediate builds that
+// shipped `effort: "max"` directly. The union `StdinEffort | string | null`
+// in `StdinData.effort` is therefore intentional and defensive across all
+// observed Claude Code versions.
 export interface StdinEffort {
   level?: "low" | "medium" | "high" | "xhigh" | "max" | null;
 }
