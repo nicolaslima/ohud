@@ -168,7 +168,7 @@ src/
     └── lines/
         ├── project.ts        # Linha 1 (mode-aware: model badge varies)
         ├── context.ts        # Linha 2 esquerda (both modes)
-        ├── gpu-time.ts       # Linha 2 direita, ollama mode
+        ├── api-time.ts       # Linha 2 direita, ollama mode
         ├── usage.ts          # Linha 2 direita, anthropic mode
         ├── cost.ts           # opt-in, anthropic mode only
         ├── prompt-cache.ts   # opt-in, anthropic mode only
@@ -255,15 +255,15 @@ The optional `out: 42.1 tok/s` line aggregates `eval_count` / `eval_duration` (O
   "pathLevels": 1,                   // 1-3
   "maxWidth": null,                  // number | null
   "elementOrder": [
-    "project", "context", "gpuTime", "usage", "cost", "promptCache",
+    "project", "context", "apiTime", "usage", "cost", "promptCache",
     "memory", "environment", "tools", "agents", "todos"
   ],
   "display": {
-    "mergeGroups": [["context", "gpuTime"], ["context", "usage"]],
+    "mergeGroups": [["context", "apiTime"], ["context", "usage"]],
     "showModel": true,
     "showContextBar": true,
     "contextValue": "percent",       // "percent" | "tokens" | "remaining" | "both"
-    "showGpuTime": true,              // ollama mode
+    "showApiTime": true,              // ollama mode
     "showUsage": true,                // anthropic mode
     "usageBarEnabled": true,          // anthropic mode
     "usageCompact": false,            // anthropic mode
@@ -299,7 +299,7 @@ The optional `out: 42.1 tok/s` line aggregates `eval_count` / `eval_duration` (O
   },
   "colors": {
     "context": "green",
-    "gpuTime": "brightBlue",
+    "apiTime": "brightBlue",
     "usage": "brightBlue",
     "warning": "yellow",
     "usageWarning": "brightMagenta",
@@ -318,9 +318,9 @@ The optional `out: 42.1 tok/s` line aggregates `eval_count` / `eval_duration` (O
 }
 ```
 
-**Differences vs claude-hud**: only `language` is removed (en-only for v0.1). Ollama-mode keys (`showGpuTime`, `ollama.*`) are added. All Anthropic-mode keys are preserved as in claude-hud — they are read only in Anthropic mode.
+**Differences vs claude-hud**: only `language` is removed (en-only for v0.1). Ollama-mode keys (`showApiTime`, `ollama.*`) are added. All Anthropic-mode keys are preserved as in claude-hud — they are read only in Anthropic mode.
 
-**Mode-aware merge groups**: `display.mergeGroups` lists pairs that may share a line. The default `[["context", "gpuTime"], ["context", "usage"]]` merges Context with whichever metric is active for the current mode (only one pair applies per render).
+**Mode-aware merge groups**: `display.mergeGroups` lists pairs that may share a line. The default `[["context", "apiTime"], ["context", "usage"]]` merges Context with whichever metric is active for the current mode (only one pair applies per render).
 
 **Presets** (from `/ohud configure` guided flow): Full / Essential / Minimal — same idea as claude-hud, presets behave identically across modes.
 

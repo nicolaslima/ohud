@@ -69,7 +69,7 @@ ohud/
 │       └── lines/
 │           ├── project.ts                 # Task 17
 │           ├── context.ts                 # Task 18
-│           ├── gpu-time.ts                # Task 19
+│           ├── api-time.ts                # Task 19
 │           ├── usage.ts                   # Task 20
 │           ├── cost.ts                    # Task 21
 │           ├── prompt-cache.ts            # Task 22
@@ -464,7 +464,7 @@ export interface HudConfig {
     showModel: boolean;
     showContextBar: boolean;
     contextValue: "percent" | "tokens" | "remaining" | "both";
-    showGpuTime: boolean;
+    showApiTime: boolean;
     showUsage: boolean;
     usageBarEnabled: boolean;
     usageCompact: boolean;
@@ -500,7 +500,7 @@ export interface HudConfig {
   };
   colors: {
     context: string;
-    gpuTime: string;
+    apiTime: string;
     usage: string;
     warning: string;
     usageWarning: string;
@@ -671,7 +671,7 @@ Create `docs/hypothesis-verification.md` with the actual output and decision:
 ## Implications for downstream tasks
 
 - Task 7 (transcript.ts): primary path or fallback path
-- Task 19 (gpu-time.ts): label is `GPU ⏱` (confirmed) or `API ⏱` (rejected)
+- Task 19 (api-time.ts): label is `API ⏱` (hypothesis rejected 2026-05-08; see `docs/hypothesis-verification.md`)
 - Task 28 (duration.ts) + tok/s: depends on `eval_count`/`eval_duration` survival; if those didn't appear, `showSpeed` renders nothing in v0.1
 ```
 
@@ -1580,7 +1580,7 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 test("returns defaults when file missing", async () => {
   const c = await loadConfig(join(dir, "config.json"));
   expect(c.lineLayout).toBe("expanded");
-  expect(c.display.showGpuTime).toBe(true);
+  expect(c.display.showApiTime).toBe(true);
   expect(c.gitStatus.enabled).toBe(true);
 });
 
@@ -1594,7 +1594,7 @@ test("merges user values over defaults", async () => {
   expect(c.pathLevels).toBe(2);
   expect(c.display.showCost).toBe(true);
   expect(c.display.showTools).toBe(true);
-  expect(c.display.showGpuTime).toBe(true); // default preserved
+  expect(c.display.showApiTime).toBe(true); // default preserved
   expect(c.colors.context).toBe("cyan");
 });
 
@@ -1623,15 +1623,15 @@ export const DEFAULT_CONFIG: HudConfig = {
   pathLevels: 1,
   maxWidth: null,
   elementOrder: [
-    "project", "context", "gpuTime", "usage", "cost", "promptCache",
+    "project", "context", "apiTime", "usage", "cost", "promptCache",
     "memory", "environment", "tools", "agents", "todos",
   ],
   display: {
-    mergeGroups: [["context", "gpuTime"], ["context", "usage"]],
+    mergeGroups: [["context", "apiTime"], ["context", "usage"]],
     showModel: true,
     showContextBar: true,
     contextValue: "percent",
-    showGpuTime: true,
+    showApiTime: true,
     showUsage: true,
     usageBarEnabled: true,
     usageCompact: false,
@@ -1667,7 +1667,7 @@ export const DEFAULT_CONFIG: HudConfig = {
   },
   colors: {
     context: "green",
-    gpuTime: "brightBlue",
+    apiTime: "brightBlue",
     usage: "brightBlue",
     warning: "yellow",
     usageWarning: "brightMagenta",
@@ -2529,59 +2529,59 @@ git commit -m "implementa render line context"
 
 ---
 
-### Task 19: render/lines/gpu-time.ts
+### Task 19: render/lines/api-time.ts
 
-**Files:** create `src/render/lines/gpu-time.ts`; append tests to `tests/render-lines.test.ts`.
+**Files:** create `src/render/lines/api-time.ts`; append tests to `tests/render-lines.test.ts`.
 
 - [ ] **Step 1: Append tests**
 
 ```typescript
-import { renderGpuTime } from "../src/render/lines/gpu-time";
+import { renderApiTime } from "../src/render/lines/api-time";
 
-test("gpu-time line in ollama mode with totalDurationNs", () => {
+test("api-time line in ollama mode with totalDurationNs", () => {
   const stdin = fx("stdin-ollama-cloud.json");
   const ctx = makeCtx(stdin, "ollama");
   ctx.transcript.totalDurationNs = 12 * 60 * 1_000_000_000 + 30 * 1_000_000_000;
-  const out = renderGpuTime(ctx);
+  const out = renderApiTime(ctx);
   expect(out).toContain("GPU");
   expect(out).toContain("12m 30s");
 });
 
-test("gpu-time line falls back to API time when transcript empty", () => {
+test("api-time line falls back to API time when transcript empty", () => {
   const stdin = fx("stdin-ollama-cloud.json");
   const ctx = makeCtx(stdin, "ollama");
   ctx.stdin.cost = { total_api_duration_ms: 75_000 };
-  const out = renderGpuTime(ctx);
+  const out = renderApiTime(ctx);
   expect(out).toContain("API");
   expect(out).toContain("1m 15s");
 });
 
-test("gpu-time line null in anthropic mode", () => {
+test("api-time line null in anthropic mode", () => {
   const stdin = fx("stdin-anthropic-pro.json");
-  expect(renderGpuTime(makeCtx(stdin, "anthropic"))).toBeNull();
+  expect(renderApiTime(makeCtx(stdin, "anthropic"))).toBeNull();
 });
 ```
 
-- [ ] **Step 2: Implement `src/render/lines/gpu-time.ts`**
+- [ ] **Step 2: Implement `src/render/lines/api-time.ts`**
 
 ```typescript
-// src/render/lines/gpu-time.ts
+// src/render/lines/api-time.ts
 import { color } from "../colors.js";
 import type { RenderContext } from "../../types.js";
 
-export function renderGpuTime(ctx: RenderContext): string | null {
+export function renderApiTime(ctx: RenderContext): string | null {
   if (ctx.mode !== "ollama") return null;
-  if (!ctx.config.display.showGpuTime) return null;
+  if (!ctx.config.display.showApiTime) return null;
   const c = ctx.config.colors;
 
   const ns = ctx.transcript.totalDurationNs;
   if (typeof ns === "number" && ns > 0) {
-    return `${color(c.label, "GPU")} ${color(c.gpuTime, `⏱ ${formatDuration(ns / 1_000_000)}`)}`;
+    return `${color(c.label, "GPU")} ${color(c.apiTime, `⏱ ${formatDuration(ns / 1_000_000)}`)}`;
   }
 
   const apiMs = ctx.stdin.cost?.total_api_duration_ms;
   if (typeof apiMs === "number" && apiMs > 0) {
-    return `${color(c.label, "API")} ${color(c.gpuTime, `⏱ ${formatDuration(apiMs)}`)}`;
+    return `${color(c.label, "API")} ${color(c.apiTime, `⏱ ${formatDuration(apiMs)}`)}`;
   }
   return null;
 }
@@ -2601,8 +2601,8 @@ function formatDuration(ms: number): string {
 
 ```bash
 bun test tests/render-lines.test.ts
-git add src/render/lines/gpu-time.ts tests/render-lines.test.ts
-git commit -m "implementa render line gpu-time"
+git add src/render/lines/api-time.ts tests/render-lines.test.ts
+git commit -m "implementa render line api-time"
 ```
 
 ---
@@ -3307,7 +3307,7 @@ import { color } from "./colors.js";
 import type { RenderContext } from "../types.js";
 import { renderProject } from "./lines/project.js";
 import { renderContext } from "./lines/context.js";
-import { renderGpuTime } from "./lines/gpu-time.js";
+import { renderApiTime } from "./lines/api-time.js";
 import { renderUsage } from "./lines/usage.js";
 import { renderCost } from "./lines/cost.js";
 import { renderPromptCache } from "./lines/prompt-cache.js";
@@ -3323,7 +3323,7 @@ type LineFn = (ctx: RenderContext) => string | null;
 const LINE_REGISTRY: Record<string, LineFn> = {
   project: renderProject,
   context: renderContext,
-  gpuTime: renderGpuTime,
+  apiTime: renderApiTime,
   usage: renderUsage,
   cost: renderCost,
   promptCache: renderPromptCache,
@@ -3345,12 +3345,12 @@ export function render(ctx: RenderContext): string {
     if (p) lines.push(p);
   }
 
-  // Line 2: context (left) merged with gpuTime|usage (right) per mergeGroups
+  // Line 2: context (left) merged with apiTime|usage (right) per mergeGroups
   const merged = collectMerged(ctx);
   if (merged) lines.push(merged);
 
   // Subsequent lines: in elementOrder, skipping already-rendered ones
-  const rendered = new Set<string>(["project", "context", "gpuTime", "usage"]);
+  const rendered = new Set<string>(["project", "context", "apiTime", "usage"]);
   for (const key of order) {
     if (rendered.has(key)) continue;
     const fn = LINE_REGISTRY[key];
@@ -3365,7 +3365,7 @@ export function render(ctx: RenderContext): string {
 
 function collectMerged(ctx: RenderContext): string | null {
   const ctxLine = renderContext(ctx);
-  const right = ctx.mode === "ollama" ? renderGpuTime(ctx) : renderUsage(ctx);
+  const right = ctx.mode === "ollama" ? renderApiTime(ctx) : renderUsage(ctx);
   if (ctxLine && right) {
     const sep = color(ctx.config.colors.label, "│");
     return `${ctxLine} ${sep} ${right}`;

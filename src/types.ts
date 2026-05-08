@@ -220,7 +220,7 @@ export interface HudConfig {
     showModel: boolean;
     showContextBar: boolean;
     contextValue: "percent" | "tokens" | "remaining" | "both";
-    showGpuTime: boolean;
+    showApiTime: boolean;
     showUsage: boolean;
     usageBarEnabled: boolean;
     usageCompact: boolean;
@@ -256,7 +256,7 @@ export interface HudConfig {
   };
   colors: {
     context: string;
-    gpuTime: string;
+    apiTime: string;
     usage: string;
     warning: string;
     usageWarning: string;
