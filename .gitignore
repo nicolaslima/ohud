@@ -59,7 +59,6 @@ draft.prompt.md
 .omc/
 
 # ohud build outputs
-dist/
 coverage/
 
 # Bun cache
