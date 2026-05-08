@@ -7,6 +7,7 @@ import { renderContext } from "../src/render/lines/context.js";
 import { renderApiTime } from "../src/render/lines/api-time.js";
 import { renderUsage } from "../src/render/lines/usage.js";
 import { renderCost } from "../src/render/lines/cost.js";
+import { renderPromptCache } from "../src/render/lines/prompt-cache.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 
@@ -126,4 +127,21 @@ test("cost line null in ollama mode", () => {
   ctx.config.display.showCost = true;
   ctx.costData = { totalUsd: 0.42, source: "native" };
   expect(renderCost(ctx)).toBeNull();
+});
+
+test("prompt cache line — anthropic mode opt-in", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showPromptCache = true;
+  ctx.transcript.lastAssistantResponseAt = new Date(Date.now() - 60_000);
+  const out = renderPromptCache(ctx);
+  expect(out).toContain("cache");
+  expect(out).toMatch(/\d+m \d+s|\d+s/);
+});
+
+test("prompt cache line null in ollama mode", () => {
+  const stdin = fx("stdin-ollama-cloud.json");
+  const ctx = makeCtx(stdin, "ollama");
+  ctx.config.display.showPromptCache = true;
+  expect(renderPromptCache(ctx)).toBeNull();
 });
