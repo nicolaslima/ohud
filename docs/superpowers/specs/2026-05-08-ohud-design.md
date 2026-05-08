@@ -38,7 +38,7 @@ Mode is determined per-invocation via cheap cached probes; the user is never ask
 | Source | Mechanism | What ohud reads |
 |--------|-----------|-----------------|
 | Claude Code stdin JSON | Piped to script every ~300ms (debounced) | `model.id`, `model.display_name`, `cwd`, `workspace.*`, `context_window.*`, `transcript_path`, `session_id`, `effort.level`, `version`, `output_style.name` |
-| Claude Code transcript JSONL | File at `stdin.transcript_path` | `tool_use`/`tool_result` blocks, `Task` blocks, `TodoWrite` blocks, assistant message bodies (which contain Ollama's `total_duration` ns when proxied) |
+| Claude Code transcript JSONL | File at `stdin.transcript_path` | `tool_use`/`tool_result` blocks, `Task` blocks, `TodoWrite` blocks, assistant message bodies (Ollama timing fields are stripped by the Anthropic-compat layer and do not appear here) |
 | Local Ollama daemon | `GET http://localhost:11434/api/version` and `GET /api/tags` | Daemon liveness, list of models with `remote_host` field populated for cloud models |
 
 **Critical reference**: official integration documented at [`docs.ollama.com/integrations/claude-code`](https://docs.ollama.com/integrations/claude-code), which prescribes:
@@ -109,11 +109,11 @@ The current mode is recorded in the cache file alongside the probe data so downs
 
 ```
 [glm-5:cloud ⚡ 1T] │ ohud git:(main*)
-Context █████░░░░░ 45% │ GPU ⏱ 12m 30s
+Context █████░░░░░ 45% │ API ⏱ 12m 30s
 ```
 
 - **Line 1** — model badge (with optional parameter size from `/api/tags` details), project path, git branch.
-- **Line 2** — context bar (color-thresholded green/yellow/red) and aggregated GPU time for this session.
+- **Line 2** — context bar (color-thresholded green/yellow/red) and aggregated API time for this session (wall-clock time Claude Code spent waiting on API calls).
 
 ### Default (2 lines), Anthropic mode
 
@@ -152,7 +152,7 @@ src/
 ├── stdin.ts            # Reads + parses Claude Code JSON from stdin (timeouts agressivos)
 ├── ollama-probe.ts     # GET /api/version + /api/tags, cache 60s em /tmp/ohud-${session_id}
 ├── mode.ts             # Decide ollama | anthropic mode + cache em /tmp
-├── transcript.ts       # Parse JSONL incremental: tools, agents, todos, total_duration sum
+├── transcript.ts       # Parse JSONL incremental: tools, agents, todos, sessionTokens sum
 ├── git.ts              # Branch, dirty, ahead/behind, file stats
 ├── config.ts           # Load/validate ~/.claude/plugins/ohud/config.json com defaults
 ├── cost.ts             # Anthropic cost: native cost.total_cost_usd OR local pricing-table estimate
@@ -182,7 +182,7 @@ src/
 
 **Module ownership rule**: each module has one responsibility, no module imports its peers' internals (only types via `types.ts`). Render layer is the only place that knows about ANSI; data layer is provider-agnostic where it can be.
 
-**Mode-aware modules**: `cost.ts`, `usage.ts`, `prompt-cache.ts`, and `render/lines/{gpu-time,usage,cost,prompt-cache}.ts` are gated on `mode` — they no-op silently outside their mode. `transcript.ts` exposes both Ollama-specific (`totalDurationNs`) and provider-agnostic (`tools`, `agents`, `todos`) fields so consumers pick what they need.
+**Mode-aware modules**: `cost.ts`, `usage.ts`, `prompt-cache.ts`, and `render/lines/{api-time,usage,cost,prompt-cache}.ts` are gated on `mode` — they no-op silently outside their mode. `transcript.ts` exposes provider-agnostic fields (`tools`, `agents`, `todos`, `sessionTokens`); Ollama-specific timing comes from `stdin.cost.total_api_duration_ms` (not from transcript), so the `api-time` module reads stdin directly.
 
 ## 9. Data flow (single invocation)
 
@@ -213,22 +213,19 @@ src/
 
 ## 10. Session metrics (mode-dependent)
 
-### Ollama mode — GPU time aggregation
+### Ollama mode — API time aggregation
 
-The Ollama API documents `total_duration` (in nanoseconds) as a top-level field on every `/api/chat` and `/api/generate` response (see `docs.ollama.com/api/usage`). The hypothesis driving this feature is that, when Claude Code is configured with `ANTHROPIC_BASE_URL=<ollama.host>`, **the Ollama daemon's Anthropic-compatible translation preserves these fields somewhere consumable from claude-code's transcript JSONL**.
+**Verification result (2026-05-08):** The hypothesis that Ollama's Anthropic-compatible translation preserves `total_duration` (or any `*_duration` / `eval_count` field) in claude-code's transcript JSONL was **REJECTED**. Tested against 35 transcripts (481+ assistant messages) from real Ollama Cloud sessions using `kimi-k2.6` and related models. Ollama's `/v1/messages` layer strips all native timing fields before returning the Anthropic-format response; they never reach the transcript.
 
-This hypothesis must be verified during implementation phase 1 (see §15 integration test). Two outcomes:
+**Primary path (implemented):** `transcript.ts` does NOT walk the transcript for timing fields. Instead, `stdin.cost.total_api_duration_ms` is used — Claude Code populates this field with its own measurement of wall-clock time spent waiting on the API. This is the closest proxy available for session time without a sidecar process.
 
-- **If verified** (transcript carries `total_duration` per response, or an equivalent `*_ns` timing field): `transcript.ts` walks the JSONL incrementally and sums it across assistant messages in the current session.
-- **If not verified** (Anthropic translation strips Ollama-native timing fields): fall back to `stdin.cost.total_api_duration_ms`, which Claude Code populates from its own measurement of how long API calls took. This is wall-clock time spent waiting on the API rather than GPU time, but it's the closest proxy available without a sidecar.
+The line label is `API ⏱` — never "GPU ⏱" and never "Quota". Format: `<H>h <M>m <S>s` with empty units suppressed; sub-minute renders as `<S>s`.
 
-In either case, the line label is `GPU ⏱` (or `API ⏱` in the fallback) — never "Quota". Format: `<H>h <M>m <S>s` with empty units suppressed; sub-minute renders as `<S>s`.
-
-- **What this measures**: cumulative compute time billed against the user's plan in **this** Claude Code session.
-- **What this does not measure**: cross-session usage. Other Claude Code sessions, `ollama run` outside Claude Code, or other tools using the same plan are invisible to this aggregation.
+- **What this measures**: cumulative wall-clock API time in **this** Claude Code session (Claude Code's own measurement).
+- **What this does not measure**: cross-session usage, GPU compute time, or plan quota. The `API ⏱` label is intentionally honest — we are measuring API latency, not GPU consumption.
 - **Honest framing**: users on Ollama Cloud know their plan has 5h/7d windows; `ohud` does not pretend to know plan consumption.
 
-If a future Ollama public usage endpoint surfaces, the gpu-time line can be augmented (or replaced) with a quota percentage without touching the rest of the architecture.
+**Future enhancement:** if a future Ollama public usage endpoint surfaces per-session timing data, the `API ⏱` line can be upgraded to `GPU ⏱` with real compute-time data without touching the rest of the architecture. If Ollama's Anthropic translation is updated to propagate `total_duration` in response metadata, `transcript.ts` can add the transcript-walk path as a higher-priority source.
 
 ### Anthropic mode — Usage bar (rate_limits)
 
@@ -425,7 +422,7 @@ tests/
 - `stdin.ts`: timeouts (first-byte, idle), invalid JSON, partial payloads, no-stdin (TTY) case.
 - `ollama-probe.ts`: cache hit/miss, daemon offline (mocked `fetch`), HTTP error responses, schema variations of `/api/tags`.
 - `mode.ts`: every fallback path + ollama-mode happy path. Property: mode is always one of `"ollama"` or `"anthropic"`, never an error state.
-- `transcript.ts`: tools running/completed, agents nested, todos progression, `total_duration` summation (Ollama), `sessionTokens` summation (Anthropic cost), transcript truncated mid-line, transcript with `/compact` markers.
+- `transcript.ts`: tools running/completed, agents nested, todos progression, `sessionTokens` summation (Anthropic cost), transcript truncated mid-line, transcript with `/compact` markers. No timing-field walk (Ollama timing does not survive the Anthropic translation layer).
 - `usage.ts`: stdin source, externalUsagePath fallback, freshness check, Bedrock hides usage, free/weekly-only accounts.
 - `cost.ts`: native `total_cost_usd` source, local pricing-table estimate fallback, Bedrock/Vertex hides cost, missing model.
 - `render/lines/*`: snapshot tests with `UPDATE_SNAPSHOTS=1` re-generation, both modes covered per opt-in line.
@@ -438,11 +435,12 @@ tests/
 
 ## 16. Open questions / future work (post v0.1)
 
-- **Hypothesis verification (phase 0 of implementation)**: confirm whether Ollama's `total_duration`/`eval_count`/`eval_duration` survive the Anthropic-compatible translation in claude-code's transcript JSONL. If not, GPU-time falls back to `cost.total_api_duration_ms` (already specified in §10).
-- **Direct quota endpoint**: if Ollama publishes a public account/usage API, replace Ollama-mode `gpu-time` line with a quota bar matching the Anthropic-mode `5h/7d` UI.
+- **Hypothesis verification (completed 2026-05-08)**: REJECTED. Ollama's `total_duration`/`eval_count`/`eval_duration` do NOT survive the Anthropic-compatible translation. The `API ⏱` fallback (`stdin.cost.total_api_duration_ms`) is now the primary (and only) path — see `docs/hypothesis-verification.md` for full results and §10 for the updated spec.
+- **Direct quota endpoint**: if Ollama publishes a public account/usage API, replace Ollama-mode `api-time` line with a quota bar matching the Anthropic-mode `5h/7d` UI.
+- **GPU time upgrade**: if a future Ollama Anthropic-layer version propagates `total_duration` in response metadata, `transcript.ts` can add the transcript-walk path as a higher-priority source; label would change from `API ⏱` to `GPU ⏱`.
 - **Rate-limit headers**: investigate whether `/api/chat` and `/api/generate` responses include `X-RateLimit-*` headers. If yes, future versions may surface them.
 - **i18n**: revisit if there's user demand. Easy lift since label strings are already centralized.
-- **Speed line (`out: 42.1 tok/s`)**: implementation deferred if hypothesis fails; otherwise aggregates `eval_count`/`eval_duration` (Ollama) or output-token timing (Anthropic) from transcript.
+- **Speed line (`out: 42.1 tok/s`)**: deferred — `eval_count`/`eval_duration` do not survive the Anthropic translation, so tok/s cannot be computed from transcript data. Hidden in v0.1 for Ollama Cloud sessions.
 
 ## 17. Summary of decisions
 
@@ -450,7 +448,7 @@ tests/
 |----|----------|-----------|
 | D1 | claude-code → Ollama Cloud connection | Daemon at `localhost:11434` (Anthropic-compatible mode, official integration) |
 | D2 | Relationship to claude-hud | Visual inspiration only; no code reuse |
-| D3 | Quota / session usage source | Ollama mode: GPU-time aggregated from transcript `total_duration`. Anthropic mode: native `rate_limits` from stdin |
+| D3 | Quota / session usage source | Ollama mode: API-time from `stdin.cost.total_api_duration_ms` (label `API ⏱`; `total_duration` does not survive the Anthropic translation layer — verified 2026-05-08). Anthropic mode: native `rate_limits` from stdin |
 | D4 | Sidecar producer | Rejected for Ollama mode; `ohud` queries Ollama daemon itself. Anthropic mode keeps optional `display.externalUsagePath` for users who already produce snapshots |
 | D5 | Distribution | Claude Code marketplace plugin |
 | D6 | Tech stack | TypeScript source; Bun preferred runtime, Node 18+ fallback; bundled `.js` distribution |
