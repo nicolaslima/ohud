@@ -1,8 +1,8 @@
 // tests/usage.test.ts
 import { test, expect } from "bun:test";
 import { join } from "node:path";
-import { fromStdin, fromExternalSnapshot } from "../src/usage";
-import type { StdinData } from "../src/types";
+import { fromStdin, fromExternalSnapshot } from "../src/usage.js";
+import type { StdinData } from "../src/types.js";
 
 test("fromStdin returns null when rate_limits absent", () => {
   const stdin: StdinData = {};
