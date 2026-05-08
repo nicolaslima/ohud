@@ -12,6 +12,7 @@ import { renderTools } from "../src/render/lines/tools.js";
 import { renderAgents } from "../src/render/lines/agents.js";
 import { renderTodos } from "../src/render/lines/todos.js";
 import { renderEnvironment } from "../src/render/lines/environment.js";
+import { renderMemory } from "../src/render/lines/memory.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 
@@ -226,4 +227,20 @@ test("environment line shows zero when nothing found", () => {
   ctx.config.display.showConfigCounts = true;
   const out = renderEnvironment(ctx);
   expect(out).toContain("CLAUDE.md");
+});
+
+test("memory line null when toggle off", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  expect(renderMemory(ctx)).toBeNull();
+});
+
+test("memory line renders when memoryInfo provided", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showMemoryUsage = true;
+  ctx.memoryInfo = { totalBytes: 32_000_000_000, usedBytes: 12_300_000_000, freeBytes: 19_700_000_000, usedPercent: 38 };
+  const out = renderMemory(ctx);
+  expect(out).toContain("RAM");
+  expect(out).toContain("38%");
 });
