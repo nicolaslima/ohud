@@ -6,6 +6,7 @@ import { renderProject } from "../src/render/lines/project.js";
 import { renderContext } from "../src/render/lines/context.js";
 import { renderApiTime } from "../src/render/lines/api-time.js";
 import { renderUsage } from "../src/render/lines/usage.js";
+import { renderCost } from "../src/render/lines/cost.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 
@@ -16,7 +17,7 @@ function makeCtx(stdin: StdinData, mode: "ollama" | "anthropic"): RenderContext 
     mode, stdin,
     transcript: { tools: [], agents: [], todos: [] },
     gitStatus: { branch: "main", dirty: true, ahead: 0, behind: 0 },
-    config: DEFAULT_CONFIG,
+    config: structuredClone(DEFAULT_CONFIG),
     usageData: null, costData: null, memoryInfo: null, cloudModels: [],
   };
 }
@@ -101,4 +102,28 @@ test("usage line — adds 7d when above threshold", () => {
   ctx.config.display.sevenDayThreshold = 80;
   const out = renderUsage(ctx);
   expect(out).toContain("90%");
+});
+
+test("cost line shows native value", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showCost = true;
+  ctx.costData = { totalUsd: 0.42, source: "native" };
+  const out = renderCost(ctx);
+  expect(out).toContain("$0.42");
+});
+
+test("cost line null when toggle off", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.costData = { totalUsd: 0.42, source: "native" };
+  expect(renderCost(ctx)).toBeNull();
+});
+
+test("cost line null in ollama mode", () => {
+  const stdin = fx("stdin-ollama-cloud.json");
+  const ctx = makeCtx(stdin, "ollama");
+  ctx.config.display.showCost = true;
+  ctx.costData = { totalUsd: 0.42, source: "native" };
+  expect(renderCost(ctx)).toBeNull();
 });
