@@ -9,23 +9,25 @@
 
 ## 1. Summary
 
-`ohud` (**O**llama **HUD**) is a Claude Code statusline plugin for users who run Claude Code against Ollama Cloud models. It renders a multi-line, real-time HUD below the prompt showing model, project, git status, context window usage, GPU time consumed in the current session, plus opt-in lines for tools, agents, todos, environment, memory, and duration.
+`ohud` (**O**llama **HUD**) is a Claude Code statusline plugin that operates in two automatically-detected modes:
 
-`ohud` is **dedicated to the Ollama Cloud setup**. It detects the user's environment and refuses to render if the session is not using a `:cloud` model — surfacing a clear `⚠` line instead of falling back to incorrect data.
+- **Ollama mode** (priority): when the local Ollama daemon is available and the current session is using an Ollama Cloud (`:cloud`) model, ohud renders Ollama-specific metrics — GPU time consumed, cloud model badge with parameter size and family, plus the standard layout (project, git, context bar, opt-in lines).
+- **Anthropic mode** (graceful fallback): when Ollama Cloud isn't in use (daemon offline, no cloud models installed, or session uses a non-cloud model), ohud renders the claude-hud-equivalent HUD with native Anthropic metrics — `rate_limits.five_hour`/`seven_day` bars, `cost.total_cost_usd`, prompt cache TTL, and the same opt-in lines.
+
+Mode is determined per-invocation via cheap cached probes; the user is never asked to configure which mode to use. The same plugin install serves both Ollama Cloud users and Anthropic-direct users.
 
 ## 2. Goals
 
-- Replicate the visual UX of `claude-hud` (multi-line layout, color thresholds, opt-in toggles) for Ollama Cloud sessions.
-- Provide accurate, non-estimated session metrics: model, context bar, GPU time, git, tools, agents, todos.
+- Replicate the visual UX of `claude-hud` (multi-line layout, color thresholds, opt-in toggles) for both Anthropic-direct and Ollama Cloud sessions.
+- Detect the active provider transparently and switch rendering accordingly — without user intervention.
+- Provide accurate, non-estimated session metrics in each mode (Ollama: GPU time; Anthropic: native rate_limits + cost).
 - Run with sub-50ms invocation cost on cache-hit (Claude Code re-runs the script every ~300ms).
-- Refuse to render misleading data: provider gating is hard-fail, not graceful degradation.
 - Distribute as an installable plugin via the Claude Code marketplace, public on GitHub from day 1.
 
 ## 3. Non-goals (v0.1)
 
-- USD cost estimation (open-source models — there is no per-token price to apply).
-- Cross-session quota tracking (no public Ollama API for plan consumption — see §10).
-- Support for non-Ollama-Cloud setups (Anthropic direct, Bedrock, Vertex, OpenAI proxies, local-only Ollama). `ohud` refuses to render in those contexts.
+- USD cost estimation for Ollama Cloud (open-source models — there is no per-token price; only Anthropic mode shows cost).
+- Cross-session Ollama Cloud quota tracking (no public Ollama API for plan consumption — see §10).
 - Producing the data feed itself: `ohud` is the consumer of data Claude Code and Ollama already expose; it does not run a daemon, sidecar, or scheduled job.
 - i18n beyond English (a future enhancement, not v0.1).
 
@@ -55,8 +57,8 @@ The Ollama daemon at `localhost:11434` acts as an Anthropic-compatible proxy and
 ```
 claude-code  ──stdin JSON──>  ohud  ──stdout──>  claude-code displays
    │                            │
-   │                            ├── reads transcript JSONL (tools, agents, todos, total_duration)
-   │                            ├── probes localhost:11434/api/version (cached 60s, gating)
+   │                            ├── reads transcript JSONL (tools, agents, todos, durations, tokens)
+   │                            ├── probes localhost:11434/api/version (cached 60s, mode detection)
    │                            └── probes localhost:11434/api/tags (cached 60s, cloud detection)
    ▼
 ~/.claude/transcripts/
@@ -65,45 +67,45 @@ claude-code  ──stdin JSON──>  ohud  ──stdout──>  claude-code dis
 `ohud` is a single bundled `.js` executable. On each Claude Code invocation it:
 
 1. Reads stdin JSON (250ms first-byte timeout, 30ms idle timeout, 256KB max).
-2. Reads probe cache from `/tmp/ohud-${session_id}.json`. If older than 60s or absent, refreshes via two HTTP calls to the local daemon.
-3. Evaluates provider gating (§6). Hard-fail paths short-circuit the rest of the pipeline.
-4. In parallel: parses transcript JSONL, runs git status, loads config.
-5. Composes lines per `config.elementOrder` and writes to stdout.
+2. Reads probe cache from `/tmp/ohud-${session_id}.json`. If older than 60s or absent, refreshes via two HTTP calls to the local daemon (timeout `ollama.probeTimeoutMs`, default 500ms — failures fall back to Anthropic mode silently).
+3. Resolves render mode (§6).
+4. In parallel: parses transcript JSONL, runs git status, loads config; in Anthropic mode also resolves `usage` and `cost`.
+5. Composes lines per `config.elementOrder` and the active mode, writes to stdout.
 
 **Performance budget**: <50ms cache-hit. Bun startup ~10ms + parse work ~30ms + render ~10ms. Cache-miss adds ~20-40ms for the local HTTP probes.
 
-## 6. Provider gating
+## 6. Mode detection
 
-`ohud` requires three signals before rendering normal output. Any failure surfaces a single warning line and exits cleanly. Error messages reference the configured `ollama.host` (default `http://localhost:11434`) rather than a hardcoded URL — users with a remote daemon see the right value.
+`ohud` chooses between two rendering modes per invocation. Detection is cheap (probes are cached for `ollama.probeCacheTtlSeconds`, default 60s) and never blocks; if probes fail or time out, mode falls back to Anthropic.
 
 ```
-Probe <ollama.host>/api/version
-   ├─ no response in <ollama.probeTimeoutMs>ms / connection refused
-   │      → render: "⚠ ohud: Ollama daemon offline at <host>"
-   │      → exit 0
-   └─ 200 OK → continue
-
-Probe <ollama.host>/api/tags  (cached <ollama.probeCacheTtlSeconds>s)
-   ├─ HTTP error
-   │      → render: "⚠ ohud: failed to query Ollama at <host> (status N)"
+Probe <ollama.host>/api/version  (cached <ollama.probeCacheTtlSeconds>s)
+   ├─ timeout (<ollama.probeTimeoutMs>ms) / connection refused / non-200
+   │      → MODE: anthropic
    └─ 200 OK
-        ├─ no models with remote_host populated
-        │      → render: "⚠ ohud: no Ollama Cloud models found (run `ollama pull <model>:cloud`)"
-        │      → exit 0
-        └─ at least one cloud model → continue
-
-Cross-check stdin.model.id against the cloud-models list
-   ├─ current model NOT in cloud list
-   │      → render: "⚠ ohud: this session is not using Ollama Cloud (model: <id>)"
-   │      → exit 0
-   └─ match → render normal HUD
+        Probe <ollama.host>/api/tags  (same cache window)
+        ├─ HTTP error
+        │      → MODE: anthropic
+        └─ 200 OK
+             ├─ no models with remote_host populated
+             │      → MODE: anthropic
+             └─ at least one cloud model
+                  Cross-check stdin.model.id against cloud-models list
+                  ├─ current model is in cloud list
+                  │      → MODE: ollama
+                  └─ current model is not cloud
+                         → MODE: anthropic
 ```
 
-The `remote_host` field in `/api/tags` is the deterministic indicator: its presence means the model is offloaded to Ollama Cloud. `:cloud` suffix matching is **not** the source of truth — `remote_host` is.
+The `remote_host` field on `/api/tags` entries is the deterministic indicator that a model is offloaded to Ollama Cloud. `:cloud` suffix matching is **not** the source of truth — `remote_host` is.
+
+**Why the bias toward Anthropic mode in failure cases**: Anthropic mode is the inherited claude-hud behavior. If Ollama isn't actively in use for this session, the user almost certainly wants the standard HUD they'd get from claude-hud, not a warning line. There is no `⚠` mode-mismatch surface — switching is silent.
+
+The current mode is recorded in the cache file alongside the probe data so downstream modules can render mode-appropriate lines without re-probing.
 
 ## 7. Output format
 
-### Default (2 lines)
+### Default (2 lines), Ollama mode
 
 ```
 [glm-5:cloud ⚡ 1T] │ ohud git:(main*)
@@ -111,7 +113,17 @@ Context █████░░░░░ 45% │ GPU ⏱ 12m 30s
 ```
 
 - **Line 1** — model badge (with optional parameter size from `/api/tags` details), project path, git branch.
-- **Line 2** — context bar (color-thresholded green/yellow/red per claude-hud) and aggregated GPU time for this session.
+- **Line 2** — context bar (color-thresholded green/yellow/red) and aggregated GPU time for this session.
+
+### Default (2 lines), Anthropic mode
+
+```
+[Opus] │ ohud git:(main*)
+Context █████░░░░░ 45% │ Usage ██░░░░░░░░ 25% (1h 30m / 5h)
+```
+
+- **Line 1** — model badge, project path, git branch (provider label such as `Bedrock`/`Vertex` appears when applicable, mirroring claude-hud).
+- **Line 2** — context bar and Anthropic subscriber `rate_limits` usage from stdin (`five_hour`, optionally `seven_day` above threshold).
 
 ### Opt-in lines (configured via `/ohud configure`)
 
@@ -139,30 +151,38 @@ src/
 ├── index.ts            # Entry point: orchestrates main()
 ├── stdin.ts            # Reads + parses Claude Code JSON from stdin (timeouts agressivos)
 ├── ollama-probe.ts     # GET /api/version + /api/tags, cache 60s em /tmp/ohud-${session_id}
-├── gating.ts           # Decide: render normal / show error line / silent exit
+├── mode.ts             # Decide ollama | anthropic mode + cache em /tmp
 ├── transcript.ts       # Parse JSONL incremental: tools, agents, todos, total_duration sum
 ├── git.ts              # Branch, dirty, ahead/behind, file stats
 ├── config.ts           # Load/validate ~/.claude/plugins/ohud/config.json com defaults
+├── cost.ts             # Anthropic cost: native cost.total_cost_usd OR local pricing-table estimate
+├── usage.ts            # Anthropic rate_limits: parse stdin + optional externalUsagePath fallback
+├── prompt-cache.ts     # Anthropic prompt-cache TTL countdown (opt-in)
 ├── memory.ts           # System RAM (opt-in)
 ├── effort.ts           # Resolve effort.level do stdin
 ├── types.ts            # TypeScript interfaces compartilhadas
 └── render/
-    ├── index.ts        # Orquestra ordering das linhas conforme config.elementOrder
+    ├── index.ts        # Orquestra ordering das linhas conforme config.elementOrder + mode
     ├── colors.ts       # ANSI helpers (named + 256 + hex)
     ├── width.ts        # Detecção de largura do terminal
     └── lines/
-        ├── project.ts        # Linha 1
-        ├── context.ts        # Linha 2 esquerda
-        ├── gpu-time.ts       # Linha 2 direita
-        ├── tools.ts          # opt-in
-        ├── agents.ts         # opt-in
-        ├── todos.ts          # opt-in
-        ├── environment.ts    # opt-in
-        ├── memory.ts         # opt-in
-        └── duration.ts       # opt-in
+        ├── project.ts        # Linha 1 (mode-aware: model badge varies)
+        ├── context.ts        # Linha 2 esquerda (both modes)
+        ├── gpu-time.ts       # Linha 2 direita, ollama mode
+        ├── usage.ts          # Linha 2 direita, anthropic mode
+        ├── cost.ts           # opt-in, anthropic mode only
+        ├── prompt-cache.ts   # opt-in, anthropic mode only
+        ├── tools.ts          # opt-in (both modes)
+        ├── agents.ts         # opt-in (both modes)
+        ├── todos.ts          # opt-in (both modes)
+        ├── environment.ts    # opt-in (both modes)
+        ├── memory.ts         # opt-in (both modes)
+        └── duration.ts       # opt-in (both modes)
 ```
 
 **Module ownership rule**: each module has one responsibility, no module imports its peers' internals (only types via `types.ts`). Render layer is the only place that knows about ANSI; data layer is provider-agnostic where it can be.
+
+**Mode-aware modules**: `cost.ts`, `usage.ts`, `prompt-cache.ts`, and `render/lines/{gpu-time,usage,cost,prompt-cache}.ts` are gated on `mode` — they no-op silently outside their mode. `transcript.ts` exposes both Ollama-specific (`totalDurationNs`) and provider-agnostic (`tools`, `agents`, `todos`) fields so consumers pick what they need.
 
 ## 9. Data flow (single invocation)
 
@@ -171,24 +191,29 @@ src/
    ├─ no stdin → setup verification message, exit 0
    └─ stdin parsed → continue
 
-2. ollama-probe.read() (cache hit em 60s)
-   ├─ daemon down → gating.eval returns "⚠ Ollama daemon offline" → render → exit 0
-   ├─ no cloud models → gating returns "⚠ no cloud models" → render → exit 0
-   └─ cloud models present → continue
+2. mode.resolve()  (consults cached probe; refreshes if stale)
+   ├─ ollama-probe.read() with <ollama.probeTimeoutMs>ms timeout
+   │     ├─ probe ok + cloud models exist + stdin.model.id is cloud → mode = "ollama"
+   │     └─ otherwise → mode = "anthropic"
+   └─ mode persisted in cache
 
-3. gating.evaluate(stdin.model.id, cloudModelIds)
-   ├─ current model not cloud → "⚠ ohud requires Ollama Cloud" → render → exit 0
-   └─ current model is cloud → continue
+3. parallel:
+   ├─ transcript.parse(stdin.transcript_path) → tools, agents, todos,
+   │                                            totalDurationNs (ollama),
+   │                                            sessionTokens (anthropic cost calc)
+   ├─ git.status(stdin.cwd) → branch, dirty, ahead/behind, file stats
+   ├─ config.load() → user toggles
+   └─ if mode = "anthropic":
+        ├─ usage.fromStdin(stdin) → 5h/7d data (or null)
+        ├─ usage.fromExternalSnapshot(config) if stdin missing → optional sidecar
+        └─ cost.resolve(stdin, sessionTokens) → native cost OR local estimate
 
-4. parallel:
-   ├─ transcript.parse(stdin.transcript_path) → tools, agents, todos, totalDurationNs
-   ├─ git.status(stdin.cwd) → branch, dirty, ahead/behind
-   └─ config.load() → user toggles
-
-5. render.compose(ctx) → string[] → console.log(lines.join('\n'))
+4. render.compose(ctx, mode) → string[] → console.log(lines.join('\n'))
 ```
 
-## 10. GPU time aggregation
+## 10. Session metrics (mode-dependent)
+
+### Ollama mode — GPU time aggregation
 
 The Ollama API documents `total_duration` (in nanoseconds) as a top-level field on every `/api/chat` and `/api/generate` response (see `docs.ollama.com/api/usage`). The hypothesis driving this feature is that, when Claude Code is configured with `ANTHROPIC_BASE_URL=<ollama.host>`, **the Ollama daemon's Anthropic-compatible translation preserves these fields somewhere consumable from claude-code's transcript JSONL**.
 
@@ -205,9 +230,21 @@ In either case, the line label is `GPU ⏱` (or `API ⏱` in the fallback) — n
 
 If a future Ollama public usage endpoint surfaces, the gpu-time line can be augmented (or replaced) with a quota percentage without touching the rest of the architecture.
 
-### Throughput line (`showSpeed`)
+### Anthropic mode — Usage bar (rate_limits)
 
-The optional `out: 42.1 tok/s` line depends on the same hypothesis: Ollama's `eval_count` and `eval_duration` reaching the transcript. Same fallback strategy — if those fields are stripped by the Anthropic translation, `showSpeed` is implemented but renders nothing (silently hidden) until a future implementation can derive the value from another source.
+`stdin.rate_limits.five_hour.used_percentage` and `stdin.rate_limits.seven_day.used_percentage` are first-class fields documented in the Claude Code statusline reference. They populate for Claude.ai subscribers (Pro/Max) after the first API response. `usage.ts` parses these directly — no aggregation needed.
+
+When `rate_limits` is absent on stdin (API-key-only users, pre-first-response, AWS Bedrock sessions), `usage.ts` checks for an opt-in `display.externalUsagePath` JSON snapshot. If neither source is available, the Usage bar is hidden silently. AWS Bedrock sessions hide usage by design (managed in AWS).
+
+The 7-day window appears when its percentage exceeds `display.sevenDayThreshold` (default 80). Reset times follow `display.timeFormat` (`relative` | `absolute` | `both`). Free/weekly-only accounts render only the 7d window.
+
+### Anthropic mode — Cost (opt-in)
+
+`cost.ts` resolves session cost in this order: native `stdin.cost.total_cost_usd` (provided by Claude Code v2.x for direct Anthropic sessions) → fallback to a local estimate from `transcript.sessionTokens` × an internal Anthropic pricing table (Opus/Sonnet/Haiku families). Cost is hidden for Bedrock and Vertex sessions because cloud-provider billing differs and `total_cost_usd` may report `$0.00` even on chargeable activity.
+
+### Throughput line (`showSpeed`, both modes)
+
+The optional `out: 42.1 tok/s` line aggregates `eval_count` / `eval_duration` (Ollama mode) or output tokens / response time (Anthropic mode) from transcript assistant messages. Renders nothing if source data is unavailable.
 
 ## 11. Configuration
 
@@ -221,15 +258,26 @@ The optional `out: 42.1 tok/s` line depends on the same hypothesis: Ollama's `ev
   "pathLevels": 1,                   // 1-3
   "maxWidth": null,                  // number | null
   "elementOrder": [
-    "project", "context", "gpuTime", "tools", "agents", "todos",
-    "environment", "memory", "duration"
+    "project", "context", "gpuTime", "usage", "cost", "promptCache",
+    "memory", "environment", "tools", "agents", "todos"
   ],
   "display": {
-    "mergeGroups": [["context", "gpuTime"]],
+    "mergeGroups": [["context", "gpuTime"], ["context", "usage"]],
     "showModel": true,
     "showContextBar": true,
     "contextValue": "percent",       // "percent" | "tokens" | "remaining" | "both"
-    "showGpuTime": true,
+    "showGpuTime": true,              // ollama mode
+    "showUsage": true,                // anthropic mode
+    "usageBarEnabled": true,          // anthropic mode
+    "usageCompact": false,            // anthropic mode
+    "showResetLabel": true,           // anthropic mode
+    "timeFormat": "relative",         // anthropic mode: "relative" | "absolute" | "both"
+    "sevenDayThreshold": 80,          // anthropic mode (0-100)
+    "externalUsagePath": "",          // anthropic mode opt-in fallback
+    "externalUsageFreshnessMs": 300000,
+    "showCost": false,                // anthropic mode opt-in
+    "showPromptCache": false,         // anthropic mode opt-in
+    "promptCacheTtlSeconds": 300,     // 300=Pro, 3600=Max
     "showTools": false,
     "showAgents": false,
     "showTodos": false,
@@ -255,7 +303,9 @@ The optional `out: 42.1 tok/s` line depends on the same hypothesis: Ollama's `ev
   "colors": {
     "context": "green",
     "gpuTime": "brightBlue",
+    "usage": "brightBlue",
     "warning": "yellow",
+    "usageWarning": "brightMagenta",
     "critical": "red",
     "model": "cyan",
     "project": "yellow",
@@ -271,9 +321,11 @@ The optional `out: 42.1 tok/s` line depends on the same hypothesis: Ollama's `ev
 }
 ```
 
-**Removed vs claude-hud**: `language` (en-only), `display.showCost`, `display.showUsage`, `display.usageBarEnabled`, `display.usageCompact`, `display.showResetLabel`, `display.timeFormat`, `display.sevenDayThreshold`, `display.externalUsagePath`, `display.externalUsageFreshnessMs`, `display.showPromptCache`, `display.promptCacheTtlSeconds`. These all assume Anthropic semantics that don't apply.
+**Differences vs claude-hud**: only `language` is removed (en-only for v0.1). Ollama-mode keys (`showGpuTime`, `ollama.*`) are added. All Anthropic-mode keys are preserved as in claude-hud — they are read only in Anthropic mode.
 
-**Presets** (from `/ohud configure` guided flow): Full / Essential / Minimal — same idea as claude-hud.
+**Mode-aware merge groups**: `display.mergeGroups` lists pairs that may share a line. The default `[["context", "gpuTime"], ["context", "usage"]]` merges Context with whichever metric is active for the current mode (only one pair applies per render).
+
+**Presets** (from `/ohud configure` guided flow): Full / Essential / Minimal — same idea as claude-hud, presets behave identically across modes.
 
 ## 12. Plugin integration
 
@@ -323,10 +375,12 @@ Commands are markdown files in `commands/` (Claude Code convention), interpreted
 |---|---|
 | stdin timeout / empty | Setup verification message, exit 0 |
 | stdin JSON invalid | Log to stderr, exit 0 (statusline blank) |
-| Ollama daemon offline (timeout 500ms) | Render warning line, exit 0 |
-| `/api/tags` HTTP error | Render warning line, exit 0 |
-| No `:cloud` models installed | Render warning line, exit 0 |
-| Current session model is not cloud | Render warning line, exit 0 |
+| Ollama daemon offline (timeout 500ms) | Mode falls back to Anthropic — silent, no warning |
+| `/api/tags` HTTP error | Mode falls back to Anthropic — silent, no warning |
+| No `:cloud` models installed | Mode falls back to Anthropic — silent, no warning |
+| Current session model is not cloud | Mode falls back to Anthropic — silent, no warning |
+| Anthropic mode + `rate_limits` absent | Hide Usage bar; check `externalUsagePath` opt-in fallback |
+| Anthropic mode + Bedrock session | Hide Usage bar (managed in AWS) and Cost (cloud-billed) |
 | Transcript path invalid/missing | Skip activity lines, render lines 1+2 normally |
 | Git command fails | Skip git info on line 1, render rest |
 | Config JSON invalid | Log to stderr, use defaults silently |
@@ -341,33 +395,42 @@ Commands are markdown files in `commands/` (Claude Code convention), interpreted
 ```
 tests/
 ├── fixtures/
-│   ├── stdin-cloud.json
-│   ├── stdin-local.json
-│   ├── stdin-no-rate-limits.json
+│   ├── stdin-anthropic-pro.json       # rate_limits populated, native cost
+│   ├── stdin-anthropic-no-limits.json # subscriber pre-first-response
+│   ├── stdin-anthropic-bedrock.json   # bedrock model id, hide cost+usage
+│   ├── stdin-ollama-cloud.json        # :cloud model selected
+│   ├── stdin-ollama-local.json        # daemon up but local-only model
 │   ├── transcript-typical.jsonl
 │   ├── transcript-with-todos.jsonl
+│   ├── transcript-ollama-with-duration.jsonl
 │   ├── api-tags-cloud.json
-│   └── api-tags-local-only.json
+│   ├── api-tags-local-only.json
+│   └── external-usage-snapshot.json
 ├── stdin.test.ts
 ├── ollama-probe.test.ts
-├── gating.test.ts
+├── mode.test.ts
 ├── transcript.test.ts
-├── render-lines.test.ts        # snapshot tests per line module
+├── usage.test.ts
+├── cost.test.ts
+├── prompt-cache.test.ts
+├── render-lines.test.ts        # snapshot tests per line module, both modes
 ├── render-width.test.ts
 ├── git.test.ts
 ├── config.test.ts
-└── integration.test.ts          # end-to-end: stdin → stdout snapshot
+└── integration.test.ts          # end-to-end: stdin → stdout snapshot, both modes
 ```
 
 ### Per-module coverage
 
 - `stdin.ts`: timeouts (first-byte, idle), invalid JSON, partial payloads, no-stdin (TTY) case.
 - `ollama-probe.ts`: cache hit/miss, daemon offline (mocked `fetch`), HTTP error responses, schema variations of `/api/tags`.
-- `gating.ts`: every error path + happy path. Property: gating output is one of `"render"` or `(warningMessage, exitCleanly)`.
-- `transcript.ts`: tools running/completed, agents nested, todos progression, `total_duration` summation, transcript truncated mid-line, transcript with `/compact` markers.
-- `render/lines/*`: snapshot tests with `UPDATE_SNAPSHOTS=1` re-generation.
+- `mode.ts`: every fallback path + ollama-mode happy path. Property: mode is always one of `"ollama"` or `"anthropic"`, never an error state.
+- `transcript.ts`: tools running/completed, agents nested, todos progression, `total_duration` summation (Ollama), `sessionTokens` summation (Anthropic cost), transcript truncated mid-line, transcript with `/compact` markers.
+- `usage.ts`: stdin source, externalUsagePath fallback, freshness check, Bedrock hides usage, free/weekly-only accounts.
+- `cost.ts`: native `total_cost_usd` source, local pricing-table estimate fallback, Bedrock/Vertex hides cost, missing model.
+- `render/lines/*`: snapshot tests with `UPDATE_SNAPSHOTS=1` re-generation, both modes covered per opt-in line.
 - `git.ts`: against a temp git repo created in `beforeEach` via `git init`.
-- `integration.test.ts`: pipe a fixture stdin into the bundled `dist/index.js`, assert stdout snapshot.
+- `integration.test.ts`: pipe a fixture stdin into the bundled `dist/index.js`, assert stdout snapshot. Cover: anthropic mode (default, all opt-ins, rate_limits absent, Bedrock), ollama mode (default, all opt-ins, daemon offline → falls back to anthropic).
 
 ### Coverage target
 
@@ -375,11 +438,11 @@ tests/
 
 ## 16. Open questions / future work (post v0.1)
 
-- **Direct quota endpoint**: if Ollama publishes a public account/usage API, replace `gpu-time` line with a quota bar matching claude-hud's 5h/7d UI.
-- **Rate-limit headers**: investigate during v0.1 implementation whether `/api/chat` and `/api/generate` responses include `X-RateLimit-*` headers. If yes, document; future versions may surface them.
+- **Hypothesis verification (phase 0 of implementation)**: confirm whether Ollama's `total_duration`/`eval_count`/`eval_duration` survive the Anthropic-compatible translation in claude-code's transcript JSONL. If not, GPU-time falls back to `cost.total_api_duration_ms` (already specified in §10).
+- **Direct quota endpoint**: if Ollama publishes a public account/usage API, replace Ollama-mode `gpu-time` line with a quota bar matching the Anthropic-mode `5h/7d` UI.
+- **Rate-limit headers**: investigate whether `/api/chat` and `/api/generate` responses include `X-RateLimit-*` headers. If yes, future versions may surface them.
 - **i18n**: revisit if there's user demand. Easy lift since label strings are already centralized.
-- **Local Ollama support**: separate flag `ollama.localOnly: true` that allows non-cloud models. Would change the gating behavior to a warn-not-fail mode. Out of scope for v0.1.
-- **Speed line (`out: 42.1 tok/s`)**: requires aggregating `eval_count`/`eval_duration` from transcript. Listed as opt-in (`showSpeed`) but implementation deferred if complexity warrants.
+- **Speed line (`out: 42.1 tok/s`)**: implementation deferred if hypothesis fails; otherwise aggregates `eval_count`/`eval_duration` (Ollama) or output-token timing (Anthropic) from transcript.
 
 ## 17. Summary of decisions
 
@@ -387,13 +450,13 @@ tests/
 |----|----------|-----------|
 | D1 | claude-code → Ollama Cloud connection | Daemon at `localhost:11434` (Anthropic-compatible mode, official integration) |
 | D2 | Relationship to claude-hud | Visual inspiration only; no code reuse |
-| D3 | Quota / session usage source | GPU-time aggregated from transcript `total_duration` |
-| D4 | Sidecar producer | Rejected; `ohud` queries Ollama daemon itself |
+| D3 | Quota / session usage source | Ollama mode: GPU-time aggregated from transcript `total_duration`. Anthropic mode: native `rate_limits` from stdin |
+| D4 | Sidecar producer | Rejected for Ollama mode; `ohud` queries Ollama daemon itself. Anthropic mode keeps optional `display.externalUsagePath` for users who already produce snapshots |
 | D5 | Distribution | Claude Code marketplace plugin |
 | D6 | Tech stack | TypeScript source; Bun preferred runtime, Node 18+ fallback; bundled `.js` distribution |
-| D7 | i18n | English only |
+| D7 | i18n | English only (v0.1) |
 | D8 | Cloud detection | `remote_host` field on `/api/tags` entries (deterministic, not suffix matching) |
 | D9 | Slash commands | Single `/ohud` namespace with `setup`/`configure` subcommands |
-| D10 | Feature scope | Full parity with claude-hud, minus Anthropic-specific features |
+| D10 | Feature scope | Full parity with claude-hud, plus Ollama-mode-specific additions; both modes are first-class |
 | D11 | Repository visibility | Public on GitHub from day 1 |
-| — | Provider gating | Hard-fail with `⚠` warning line if not Ollama Cloud |
+| — | Mode strategy | **Auto-detected**: Ollama-first when daemon + cloud model present; Anthropic fallback otherwise. No user-facing toggle, no warning lines for the fallback case |
