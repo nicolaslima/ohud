@@ -1,0 +1,37 @@
+{
+  "name": "ohud",
+  "version": "0.1.0",
+  "description": "Real-time statusline HUD for Claude Code with Ollama Cloud + Anthropic dual-mode rendering",
+  "type": "module",
+  "main": "dist/index.js",
+  "files": [
+    "dist/",
+    "src/",
+    "commands/",
+    ".claude-plugin/"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --target=node --outfile=dist/index.js",
+    "test": "bun test",
+    "test:update": "bun test --update-snapshots",
+    "typecheck": "tsc --noEmit",
+    "verify:hypothesis": "bun run scripts/verify-ollama-hypothesis.ts"
+  },
+  "keywords": [
+    "claude-code",
+    "statusline",
+    "hud",
+    "ollama",
+    "ollama-cloud"
+  ],
+  "author": "nicolaslima <lima.nicolasmateus@gmail.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

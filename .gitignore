@@ -57,3 +57,13 @@ draft.prompt.md
 
 # OMC runtime state
 .omc/
+
+# ohud build outputs
+dist/
+coverage/
+
+# Bun cache
+.bun-cache/
+
+# Hypothesis verification scratch
+/tmp-hypothesis-*.txt
