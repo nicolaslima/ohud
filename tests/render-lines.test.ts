@@ -10,6 +10,7 @@ import { renderCost } from "../src/render/lines/cost.js";
 import { renderPromptCache } from "../src/render/lines/prompt-cache.js";
 import { renderTools } from "../src/render/lines/tools.js";
 import { renderAgents } from "../src/render/lines/agents.js";
+import { renderTodos } from "../src/render/lines/todos.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 
@@ -188,4 +189,25 @@ test("agents line null with no agents", () => {
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showAgents = true;
   expect(renderAgents(ctx)).toBeNull();
+});
+
+test("todos line shows in-progress + counts", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTodos = true;
+  ctx.transcript.todos = [
+    { content: "Fix auth bug", status: "in_progress" },
+    { content: "Write tests", status: "pending" },
+    { content: "Update docs", status: "completed" },
+  ];
+  const out = renderTodos(ctx);
+  expect(out).toContain("Fix auth bug");
+  expect(out).toContain("(1/3)");
+});
+
+test("todos line null when no todos", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTodos = true;
+  expect(renderTodos(ctx)).toBeNull();
 });
