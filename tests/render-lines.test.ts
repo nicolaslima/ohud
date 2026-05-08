@@ -9,6 +9,7 @@ import { renderUsage } from "../src/render/lines/usage.js";
 import { renderCost } from "../src/render/lines/cost.js";
 import { renderPromptCache } from "../src/render/lines/prompt-cache.js";
 import { renderTools } from "../src/render/lines/tools.js";
+import { renderAgents } from "../src/render/lines/agents.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 
@@ -167,4 +168,24 @@ test("tools line null when toggle off", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
   expect(renderTools(ctx)).toBeNull();
+});
+
+test("agents line shows running agent", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showAgents = true;
+  ctx.transcript.agents = [
+    { id: "1", type: "explore", description: "Finding auth code", model: "haiku", status: "running", startTime: new Date(Date.now() - 90_000) },
+  ];
+  const out = renderAgents(ctx);
+  expect(out).toContain("explore");
+  expect(out).toContain("haiku");
+  expect(out).toContain("Finding auth code");
+});
+
+test("agents line null with no agents", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showAgents = true;
+  expect(renderAgents(ctx)).toBeNull();
 });
