@@ -1,0 +1,4 @@
+{"type":"summary","summary":"test session","leafUuid":"x"}
+{"type":"user","message":{"role":"user","content":"hi"},"uuid":"u1","timestamp":"2026-05-08T10:00:00.000Z","sessionId":"s1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello"},{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/x"}}],"usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}},"uuid":"a1","timestamp":"2026-05-08T10:00:01.000Z","sessionId":"s1"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"uuid":"u2","timestamp":"2026-05-08T10:00:02.000Z","sessionId":"s1"}

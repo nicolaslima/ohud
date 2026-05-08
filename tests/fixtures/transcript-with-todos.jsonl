@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"list things"},"uuid":"u1","timestamp":"2026-05-08T10:00:00.000Z","sessionId":"s2"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"TodoWrite","input":{"todos":[{"content":"do A","status":"in_progress"},{"content":"do B","status":"pending"},{"content":"do C","status":"completed"}]}}]},"uuid":"a1","timestamp":"2026-05-08T10:00:01.000Z","sessionId":"s2"}
