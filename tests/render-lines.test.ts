@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { renderProject } from "../src/render/lines/project.js";
 import { renderContext } from "../src/render/lines/context.js";
 import { renderApiTime } from "../src/render/lines/api-time.js";
+import { renderUsage } from "../src/render/lines/usage.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 
@@ -70,4 +71,34 @@ test("api-time line falls back to API time when transcript empty", () => {
 test("api-time line null in anthropic mode", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   expect(renderApiTime(makeCtx(stdin, "anthropic"))).toBeNull();
+});
+
+test("usage line — bar with 5h", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.usageData = { fiveHour: 25, sevenDay: 41, fiveHourResetAt: new Date(Date.now() + 90 * 60 * 1000), sevenDayResetAt: null };
+  const out = renderUsage(ctx);
+  expect(out).toContain("Usage");
+  expect(out).toContain("25%");
+});
+
+test("usage line — null in ollama mode", () => {
+  const stdin = fx("stdin-ollama-cloud.json");
+  const ctx = makeCtx(stdin, "ollama");
+  expect(renderUsage(ctx)).toBeNull();
+});
+
+test("usage line — null when usageData missing", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  expect(renderUsage(ctx)).toBeNull();
+});
+
+test("usage line — adds 7d when above threshold", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.usageData = { fiveHour: 50, sevenDay: 90, fiveHourResetAt: null, sevenDayResetAt: null };
+  ctx.config.display.sevenDayThreshold = 80;
+  const out = renderUsage(ctx);
+  expect(out).toContain("90%");
 });
