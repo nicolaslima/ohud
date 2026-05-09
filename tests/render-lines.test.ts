@@ -319,6 +319,97 @@ test("memory line renders when memoryInfo provided", () => {
   expect(out).toContain("38%");
 });
 
+test("context line uses warning color at 60% (new threshold)", () => {
+  const stdin: StdinData = {
+    context_window: { used_percentage: 60, context_window_size: 200_000, total_input_tokens: 120_000 },
+  };
+  const ctx = makeCtx(stdin, "anthropic");
+  // default colors: warning=yellow → ANSI \x1b[33m
+  const out = renderContext(ctx);
+  expect(out).toContain("\x1b[33m"); // yellow
+  expect(out).not.toContain("\x1b[31m"); // not red
+});
+
+test("context line uses critical color at 75% (new threshold)", () => {
+  const stdin: StdinData = {
+    context_window: { used_percentage: 75, context_window_size: 200_000, total_input_tokens: 150_000 },
+  };
+  const ctx = makeCtx(stdin, "anthropic");
+  const out = renderContext(ctx);
+  expect(out).toContain("\x1b[31m"); // red
+});
+
+test("context line uses default color below 60% (new threshold)", () => {
+  const stdin: StdinData = {
+    context_window: { used_percentage: 59, context_window_size: 200_000, total_input_tokens: 118_000 },
+  };
+  const ctx = makeCtx(stdin, "anthropic");
+  const out = renderContext(ctx);
+  expect(out).toContain("\x1b[32m"); // green (context default)
+  expect(out).not.toContain("\x1b[33m"); // not yellow
+  expect(out).not.toContain("\x1b[31m"); // not red
+});
+
+test("usage line uses usageWarning color at 60% (new threshold)", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.usageData = { fiveHour: 60, sevenDay: null, fiveHourResetAt: null, sevenDayResetAt: null };
+  const out = renderUsage(ctx);
+  // brightMagenta = \x1b[95m
+  expect(out).toContain("\x1b[95m");
+  expect(out).not.toContain("\x1b[31m"); // not red
+});
+
+test("usage line uses critical color at 75% (new threshold)", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.usageData = { fiveHour: 75, sevenDay: null, fiveHourResetAt: null, sevenDayResetAt: null };
+  const out = renderUsage(ctx);
+  expect(out).toContain("\x1b[31m"); // red
+});
+
+test("memory line uses warning color at 65%", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showMemoryUsage = true;
+  ctx.memoryInfo = { totalBytes: 16_000_000_000, usedBytes: 10_400_000_000, freeBytes: 5_600_000_000, usedPercent: 65 };
+  const out = renderMemory(ctx);
+  expect(out).toContain("\x1b[33m"); // yellow (warning)
+  expect(out).not.toContain("\x1b[31m"); // not red
+});
+
+test("memory line uses critical color at 76%", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showMemoryUsage = true;
+  ctx.memoryInfo = { totalBytes: 16_000_000_000, usedBytes: 12_160_000_000, freeBytes: 3_840_000_000, usedPercent: 76 };
+  const out = renderMemory(ctx);
+  expect(out).toContain("\x1b[31m"); // red (critical)
+});
+
+test("memory line uses default color below threshold (38%)", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showMemoryUsage = true;
+  ctx.memoryInfo = { totalBytes: 32_000_000_000, usedBytes: 12_300_000_000, freeBytes: 19_700_000_000, usedPercent: 38 };
+  const out = renderMemory(ctx);
+  // brightBlue = \x1b[94m (usage default)
+  expect(out).toContain("\x1b[94m");
+  expect(out).not.toContain("\x1b[33m"); // not yellow
+  expect(out).not.toContain("\x1b[31m"); // not red
+});
+
+test("custom warningThreshold flows through to context renderer", () => {
+  const stdin: StdinData = {
+    context_window: { used_percentage: 50, context_window_size: 200_000, total_input_tokens: 100_000 },
+  };
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.warningThreshold = 40;
+  ctx.config.display.criticalThreshold = 90;
+  const out = renderContext(ctx);
+  expect(out).toContain("\x1b[33m"); // yellow at 50% with warning=40
+});
+
 test("duration line shows session time", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   stdin.cost = { total_duration_ms: 5 * 60_000 };

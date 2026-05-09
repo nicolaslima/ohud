@@ -1,6 +1,7 @@
 // src/render/lines/context.ts
 import { color } from "../colors.js";
 import { glyph } from "../glyphs.js";
+import { barColorForPercent } from "../thresholds.js";
 import type { RenderContext } from "../../types.js";
 
 const BAR_WIDTH = 10;
@@ -12,9 +13,14 @@ export function renderContext(ctx: RenderContext): string | null {
   const rounded = Math.round(pct);
 
   const c = ctx.config.colors;
-  let barColor = c.context;
-  if (rounded >= 85) barColor = c.critical;
-  else if (rounded >= 70) barColor = c.warning;
+  const barColor = barColorForPercent(rounded, {
+    default: c.context,
+    warning: c.warning,
+    critical: c.critical,
+  }, {
+    warning: ctx.config.display.warningThreshold,
+    critical: ctx.config.display.criticalThreshold,
+  });
 
   const filled = Math.floor((rounded * BAR_WIDTH) / 100);
   const empty = BAR_WIDTH - filled;

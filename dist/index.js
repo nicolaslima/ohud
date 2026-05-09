@@ -209,6 +209,8 @@ var DEFAULT_CONFIG = {
     showResetLabel: true,
     timeFormat: "relative",
     sevenDayThreshold: 80,
+    warningThreshold: 60,
+    criticalThreshold: 75,
     externalUsagePath: "",
     externalUsageFreshnessMs: 300000,
     showCost: false,
@@ -880,6 +882,15 @@ function effortBlock(ctx) {
   return color(ctx.config.colors.label, `effort:${ctx.effortLevel}`);
 }
 
+// src/render/thresholds.ts
+function barColorForPercent(pct, palette, thresholds = { warning: 60, critical: 75 }) {
+  if (pct >= thresholds.critical)
+    return palette.critical;
+  if (pct >= thresholds.warning)
+    return palette.warning;
+  return palette.default;
+}
+
 // src/render/lines/context.ts
 var BAR_WIDTH = 10;
 function renderContext(ctx) {
@@ -890,11 +901,14 @@ function renderContext(ctx) {
     return null;
   const rounded = Math.round(pct);
   const c = ctx.config.colors;
-  let barColor = c.context;
-  if (rounded >= 85)
-    barColor = c.critical;
-  else if (rounded >= 70)
-    barColor = c.warning;
+  const barColor = barColorForPercent(rounded, {
+    default: c.context,
+    warning: c.warning,
+    critical: c.critical
+  }, {
+    warning: ctx.config.display.warningThreshold,
+    critical: ctx.config.display.criticalThreshold
+  });
   const filled = Math.floor(rounded * BAR_WIDTH / 100);
   const empty2 = BAR_WIDTH - filled;
   const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(empty2);
@@ -966,11 +980,14 @@ function renderUsage(ctx) {
 }
 function formatWindow(ctx, label, pct, resetAt) {
   const c = ctx.config.colors;
-  let lineColor = c.usage;
-  if (pct >= 85)
-    lineColor = c.critical;
-  else if (pct >= 60)
-    lineColor = c.usageWarning;
+  const lineColor = barColorForPercent(pct, {
+    default: c.usage,
+    warning: c.usageWarning,
+    critical: c.critical
+  }, {
+    warning: ctx.config.display.warningThreshold,
+    critical: ctx.config.display.criticalThreshold
+  });
   let core;
   if (ctx.config.display.usageBarEnabled && !ctx.config.display.usageCompact) {
     const filled = Math.floor(pct * BAR_WIDTH2 / 100);
@@ -1192,11 +1209,19 @@ function renderMemory(ctx) {
   if (!ctx.memoryInfo)
     return null;
   const c = ctx.config.colors;
+  const barColor = barColorForPercent(ctx.memoryInfo.usedPercent, {
+    default: c.usage,
+    warning: c.warning,
+    critical: c.critical
+  }, {
+    warning: ctx.config.display.warningThreshold,
+    critical: ctx.config.display.criticalThreshold
+  });
   const filled = Math.floor(ctx.memoryInfo.usedPercent * BAR_WIDTH3 / 100);
   const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(BAR_WIDTH3 - filled);
   const usedGb = (ctx.memoryInfo.usedBytes / 1e9).toFixed(1);
   const totalGb = (ctx.memoryInfo.totalBytes / 1e9).toFixed(1);
-  return `${color(c.label, "RAM")} ${color(c.usage, bar)} ${color(c.label, `${ctx.memoryInfo.usedPercent}% (${usedGb} GB / ${totalGb} GB)`)}`;
+  return `${color(c.label, "RAM")} ${color(barColor, bar)} ${color(c.label, `${ctx.memoryInfo.usedPercent}% (${usedGb} GB / ${totalGb} GB)`)}`;
 }
 
 // src/render/lines/duration.ts

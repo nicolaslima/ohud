@@ -22,6 +22,8 @@ export const DEFAULT_CONFIG: HudConfig = {
     showResetLabel: true,
     timeFormat: "relative",
     sevenDayThreshold: 80,
+    warningThreshold: 60,
+    criticalThreshold: 75,
     externalUsagePath: "",
     externalUsageFreshnessMs: 300000,
     showCost: false,

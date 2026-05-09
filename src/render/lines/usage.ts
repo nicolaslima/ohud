@@ -1,6 +1,7 @@
 // src/render/lines/usage.ts
 import { color } from "../colors.js";
 import { glyph } from "../glyphs.js";
+import { barColorForPercent } from "../thresholds.js";
 import type { RenderContext } from "../../types.js";
 
 const BAR_WIDTH = 10;
@@ -25,9 +26,14 @@ export function renderUsage(ctx: RenderContext): string | null {
 
 function formatWindow(ctx: RenderContext, label: string, pct: number, resetAt: Date | null): string {
   const c = ctx.config.colors;
-  let lineColor = c.usage;
-  if (pct >= 85) lineColor = c.critical;
-  else if (pct >= 60) lineColor = c.usageWarning;
+  const lineColor = barColorForPercent(pct, {
+    default: c.usage,
+    warning: c.usageWarning,
+    critical: c.critical,
+  }, {
+    warning: ctx.config.display.warningThreshold,
+    critical: ctx.config.display.criticalThreshold,
+  });
 
   let core: string;
   if (ctx.config.display.usageBarEnabled && !ctx.config.display.usageCompact) {

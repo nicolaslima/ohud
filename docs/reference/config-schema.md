@@ -54,6 +54,8 @@ Fields under `display` control which line modules emit and how they format. Defa
 | `showResetLabel` | `boolean` | `true` | (Anthropic mode) Append `resets in ~1h` (or absolute) after each window. |
 | `timeFormat` | `"relative" \| "absolute" \| "both"` | `"relative"` | How to format the reset time when `showResetLabel: true`. |
 | `sevenDayThreshold` | `number` | `80` | (Anthropic mode) Hide 7d window unless usage % is at least this. Reduces noise during normal sessions. |
+| `warningThreshold` | `number` | `60` | Min pct for `colors.warning` (or `colors.usageWarning` for usage) on all percentage bars (context, usage, memory). |
+| `criticalThreshold` | `number` | `75` | Min pct for `colors.critical` on all percentage bars. Higher priority than warning. |
 
 ### External usage source
 
@@ -107,9 +109,9 @@ Named colors supported: `dim`, `red`, `green`, `yellow`, `magenta`, `cyan`, `bri
 | `context` | `"green"` | Context bar fill (low usage) |
 | `apiTime` | `"brightBlue"` | API ⏱ value |
 | `usage` | `"brightBlue"` | Usage bar fill (low) |
-| `warning` | `"yellow"` | Warning thresholds (context >70%, push warning) |
-| `usageWarning` | `"brightMagenta"` | Usage 60-85% — distinct from `warning` so users can map "usage warning" specifically. |
-| `critical` | `"red"` | All critical thresholds (>85%, push critical, error sentinel) |
+| `warning` | `"yellow"` | Warning bar color (context/memory ≥ `warningThreshold`, push warning) |
+| `usageWarning` | `"brightMagenta"` | Usage bar at ≥ `warningThreshold` — distinct from `warning` so users can map "usage saturation" specifically. |
+| `critical` | `"red"` | Critical bar color (≥ `criticalThreshold` on context/usage/memory, push critical, error sentinel) |
 | `model` | `"cyan"` | `[modelName]` brackets |
 | `project` | `"yellow"` | Project path |
 | `git` | `"magenta"` | `git:(`, `)` parens |

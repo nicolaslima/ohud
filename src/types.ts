@@ -217,6 +217,8 @@ export interface HudConfig {
     showResetLabel: boolean;
     timeFormat: "relative" | "absolute" | "both";
     sevenDayThreshold: number;
+    warningThreshold: number;
+    criticalThreshold: number;
     externalUsagePath: string;
     externalUsageFreshnessMs: number;
     showCost: boolean;

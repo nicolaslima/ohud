@@ -98,13 +98,15 @@ Context ████░░░░░░ 43%
 
 Largura fixa: `BAR_WIDTH = 10` caracteres. Glyphs `barFull`/`barEmpty` (`█`/`░` em unicode, `#`/`.` em ASCII).
 
-### Cor por threshold (`context.ts:14-17`)
+### Cor por threshold (`context.ts`)
+
+Usa a escala unificada `display.warningThreshold` / `display.criticalThreshold` (default 60 / 75) via `src/render/thresholds.ts:barColorForPercent`.
 
 | `used_percentage` | Cor |
 |---|---|
-| < 70 | `colors.context` (default `green`) |
-| 70 – 84 | `colors.warning` (default `yellow`) |
-| ≥ 85 | `colors.critical` (default `red`) |
+| < `warningThreshold` (60) | `colors.context` (default `green`) |
+| ≥ `warningThreshold` (60) e < `criticalThreshold` (75) | `colors.warning` (default `yellow`) |
+| ≥ `criticalThreshold` (75) | `colors.critical` (default `red`) |
 
 ### Formato do número (`contextValue` config)
 
@@ -184,13 +186,15 @@ Apenas se `sevenDay >= display.sevenDayThreshold` (default 80). Mantém a linha 
 
 ### Cor por window pct
 
+Mesma escala unificada `display.warningThreshold` / `display.criticalThreshold` (default 60 / 75), porém o slot de "warning" usa `colors.usageWarning` em vez de `colors.warning`.
+
 | % | Cor |
 |---|---|
-| < 60 | `colors.usage` (default `brightBlue`) |
-| 60 – 84 | `colors.usageWarning` (default `brightMagenta`) |
-| ≥ 85 | `colors.critical` (default `red`) |
+| < `warningThreshold` (60) | `colors.usage` (default `brightBlue`) |
+| ≥ `warningThreshold` (60) e < `criticalThreshold` (75) | `colors.usageWarning` (default `brightMagenta`) |
+| ≥ `criticalThreshold` (75) | `colors.critical` (default `red`) |
 
-`usageWarning` é distinta de `warning` para que usuários possam mapear "saturação de window" separadamente do "context >70%".
+`usageWarning` é distinta de `warning` para que usuários possam mapear "saturação de window" separadamente do "context warning". Os thresholds, porém, são unificados.
 
 ### Reset label (`showResetLabel: true`)
 
@@ -423,6 +427,18 @@ RAM ███████░░░ 71% (11.4 GB / 16.0 GB)
 ```
 
 `memoryInfo` vem de `src/memory.ts:readSystemMemory` que usa `os.totalmem()` / `os.freemem()` em todas as plataformas.
+
+### Cor por threshold
+
+Usa a mesma escala unificada `display.warningThreshold` / `display.criticalThreshold` (default 60 / 75) que `context` e `usage`. Como memória não tem palette dedicada, recorre ao `colors.warning` genérico.
+
+| `usedPercent` | Cor da barra |
+|---|---|
+| < `warningThreshold` (60) | `colors.usage` (default `brightBlue`) |
+| ≥ `warningThreshold` (60) e < `criticalThreshold` (75) | `colors.warning` (default `yellow`) |
+| ≥ `criticalThreshold` (75) | `colors.critical` (default `red`) |
+
+O label `RAM` e o texto `% (used / total)` ficam sempre em `colors.label` (default `dim`); só a barra muda de cor.
 
 ### Detalhe — `lineLayout === "compact"`
 
