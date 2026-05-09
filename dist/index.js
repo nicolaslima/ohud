@@ -810,6 +810,12 @@ function glyph(key, mode) {
   return resolved === "ascii" ? ASCII[key] : UNICODE[key];
 }
 
+// src/render/path.ts
+function basename(p) {
+  const parts = p.split("/").filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : "";
+}
+
 // src/render/lines/project.ts
 function renderProject(ctx) {
   const c = ctx.config;
@@ -849,10 +855,6 @@ function projectPath(ctx) {
   const parts = dir.split("/").filter(Boolean);
   const n = ctx.config.pathLevels;
   return parts.slice(-n).join("/");
-}
-function basename(p) {
-  const parts = p.split("/").filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1] : "";
 }
 function gitBlock(ctx) {
   if (!ctx.config.gitStatus.enabled || !ctx.gitStatus)
@@ -1060,15 +1062,11 @@ function renderTools(ctx) {
   const c = ctx.config.colors;
   const parts = [];
   for (const t of running)
-    parts.push(`${color(c.label, glyph("running", ctx.config.display.glyphs))} ${t.name}${t.target ? `: ${basename2(t.target)}` : ""}`);
+    parts.push(`${color(c.label, glyph("running", ctx.config.display.glyphs))} ${t.name}${t.target ? `: ${basename(t.target)}` : ""}`);
   const tally = countByName(completed);
   for (const [name, count] of tally)
     parts.push(`${color(c.label, glyph("done", ctx.config.display.glyphs))} ${name}${count > 1 ? ` ×${count}` : ""}`);
   return parts.join(color(c.label, " | "));
-}
-function basename2(p) {
-  const i = p.lastIndexOf("/");
-  return i >= 0 ? p.slice(i + 1) : p;
 }
 function countByName(entries) {
   const m = new Map;

@@ -1,6 +1,7 @@
 // src/render/lines/project.ts
 import { color } from "../colors.js";
 import { glyph } from "../glyphs.js";
+import { basename } from "../path.js";
 import type { RenderContext } from "../../types.js";
 
 export function renderProject(ctx: RenderContext): string {
@@ -39,11 +40,6 @@ function projectPath(ctx: RenderContext): string {
   const parts = dir.split("/").filter(Boolean);
   const n = ctx.config.pathLevels;
   return parts.slice(-n).join("/");
-}
-
-function basename(p: string): string {
-  const parts = p.split("/").filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1]! : "";
 }
 
 function gitBlock(ctx: RenderContext): string {

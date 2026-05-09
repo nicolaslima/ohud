@@ -1,6 +1,7 @@
 // src/render/lines/tools.ts
 import { color } from "../colors.js";
 import { glyph } from "../glyphs.js";
+import { basename } from "../path.js";
 import type { RenderContext, ToolEntry } from "../../types.js";
 
 export function renderTools(ctx: RenderContext): string | null {
@@ -16,11 +17,6 @@ export function renderTools(ctx: RenderContext): string | null {
   const tally = countByName(completed);
   for (const [name, count] of tally) parts.push(`${color(c.label, glyph("done", ctx.config.display.glyphs))} ${name}${count > 1 ? ` ×${count}` : ""}`);
   return parts.join(color(c.label, " | "));
-}
-
-function basename(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i >= 0 ? p.slice(i + 1) : p;
 }
 
 function countByName(entries: ToolEntry[]): Map<string, number> {
