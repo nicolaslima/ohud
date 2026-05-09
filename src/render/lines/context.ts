@@ -1,5 +1,6 @@
 // src/render/lines/context.ts
 import { color } from "../colors.js";
+import { glyph } from "../glyphs.js";
 import type { RenderContext } from "../../types.js";
 
 const BAR_WIDTH = 10;
@@ -17,7 +18,7 @@ export function renderContext(ctx: RenderContext): string | null {
 
   const filled = Math.floor((rounded * BAR_WIDTH) / 100);
   const empty = BAR_WIDTH - filled;
-  const bar = "█".repeat(filled) + "░".repeat(empty);
+  const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(empty);
   const valuePart = formatValue(ctx, rounded);
 
   return `${color(c.label, "Context")} ${color(barColor, bar)} ${color(barColor, valuePart)}`;

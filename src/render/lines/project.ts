@@ -1,5 +1,6 @@
 // src/render/lines/project.ts
 import { color } from "../colors.js";
+import { glyph } from "../glyphs.js";
 import type { RenderContext } from "../../types.js";
 
 export function renderProject(ctx: RenderContext): string {
@@ -14,7 +15,7 @@ export function renderProject(ctx: RenderContext): string {
   if (projectLabel) parts.push(color(c.colors.project, projectLabel));
   if (gitLabel) parts.push(gitLabel);
   if (effortLabel) parts.push(effortLabel);
-  return parts.join(color(c.colors.label, " │ "));
+  return parts.join(color(c.colors.label, ` ${glyph("sep", c.display.glyphs)} `));
 }
 
 function modelBadge(ctx: RenderContext): string {
@@ -22,7 +23,7 @@ function modelBadge(ctx: RenderContext): string {
   if (ctx.mode !== "ollama") return name;
   const cloudInfo = ctx.cloudModels.find((m) => m.name === ctx.stdin.model?.id || m.model === ctx.stdin.model?.id);
   const param = cloudInfo?.details?.parameter_size;
-  return param ? `${name} ⚡ ${param}` : name;
+  return param ? `${name} ${glyph("bolt", ctx.config.display.glyphs)} ${param}` : name;
 }
 
 function projectPath(ctx: RenderContext): string {
@@ -49,7 +50,7 @@ function gitBlock(ctx: RenderContext): string {
         ctx.config.gitStatus.pushCriticalThreshold > 0 && a >= ctx.config.gitStatus.pushCriticalThreshold ? c.critical
         : ctx.config.gitStatus.pushWarningThreshold > 0 && a >= ctx.config.gitStatus.pushWarningThreshold ? c.warning
         : c.gitBranch;
-      aheadBehind = ` ${color(aColor, `↑${a}`)} ${color(c.gitBranch, `↓${b}`)}`;
+      aheadBehind = ` ${color(aColor, `${glyph("up", ctx.config.display.glyphs)}${a}`)} ${color(c.gitBranch, `${glyph("down", ctx.config.display.glyphs)}${b}`)}`;
     }
   }
   return `${wrapper("git:(")}${branch}${aheadBehind}${wrapper(")")}`;

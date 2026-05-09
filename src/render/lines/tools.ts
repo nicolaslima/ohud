@@ -1,5 +1,6 @@
 // src/render/lines/tools.ts
 import { color } from "../colors.js";
+import { glyph } from "../glyphs.js";
 import type { RenderContext, ToolEntry } from "../../types.js";
 
 export function renderTools(ctx: RenderContext): string | null {
@@ -11,9 +12,9 @@ export function renderTools(ctx: RenderContext): string | null {
   const completed = tools.filter((t) => t.status === "completed");
   const c = ctx.config.colors;
   const parts: string[] = [];
-  for (const t of running) parts.push(`${color(c.label, "◐")} ${t.name}${t.target ? `: ${basename(t.target)}` : ""}`);
+  for (const t of running) parts.push(`${color(c.label, glyph("running", ctx.config.display.glyphs))} ${t.name}${t.target ? `: ${basename(t.target)}` : ""}`);
   const tally = countByName(completed);
-  for (const [name, count] of tally) parts.push(`${color(c.label, "✓")} ${name}${count > 1 ? ` ×${count}` : ""}`);
+  for (const [name, count] of tally) parts.push(`${color(c.label, glyph("done", ctx.config.display.glyphs))} ${name}${count > 1 ? ` ×${count}` : ""}`);
   return parts.join(color(c.label, " | "));
 }
 

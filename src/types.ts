@@ -230,6 +230,7 @@ export interface HudConfig {
     showSpeed: boolean;
     showMemoryUsage: boolean;
     showEffortLevel: boolean;
+    glyphs: "unicode" | "ascii" | "auto";
   };
   gitStatus: {
     enabled: boolean;

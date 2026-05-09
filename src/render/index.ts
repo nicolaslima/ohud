@@ -1,5 +1,6 @@
 // src/render/index.ts
 import { color } from "./colors.js";
+import { glyph } from "./glyphs.js";
 import type { RenderContext } from "../types.js";
 import { renderProject } from "./lines/project.js";
 import { renderContext } from "./lines/context.js";
@@ -66,7 +67,7 @@ function collectMerged(ctx: RenderContext): string | null {
   const ctxLine = renderContext(ctx);
   const right = ctx.mode === "ollama" ? renderApiTime(ctx) : renderUsage(ctx);
   if (ctxLine && right) {
-    const sep = color(ctx.config.colors.label, "│");
+    const sep = color(ctx.config.colors.label, glyph("sep", ctx.config.display.glyphs));
     return `${ctxLine} ${sep} ${right}`;
   }
   return ctxLine ?? right ?? null;

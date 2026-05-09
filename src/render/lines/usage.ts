@@ -1,5 +1,6 @@
 // src/render/lines/usage.ts
 import { color } from "../colors.js";
+import { glyph } from "../glyphs.js";
 import type { RenderContext } from "../../types.js";
 
 const BAR_WIDTH = 10;
@@ -31,7 +32,7 @@ function formatWindow(ctx: RenderContext, label: string, pct: number, resetAt: D
   let core: string;
   if (ctx.config.display.usageBarEnabled && !ctx.config.display.usageCompact) {
     const filled = Math.floor((pct * BAR_WIDTH) / 100);
-    const bar = "█".repeat(filled) + "░".repeat(BAR_WIDTH - filled);
+    const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(BAR_WIDTH - filled);
     core = `${color(lineColor, bar)} ${color(lineColor, `${pct}%`)} (${label})`;
   } else {
     core = color(lineColor, `${label}: ${pct}%`);

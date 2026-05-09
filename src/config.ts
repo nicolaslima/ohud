@@ -35,6 +35,7 @@ export const DEFAULT_CONFIG: HudConfig = {
     showSpeed: false,
     showMemoryUsage: false,
     showEffortLevel: true,
+    glyphs: "auto",
   },
   gitStatus: {
     enabled: true,

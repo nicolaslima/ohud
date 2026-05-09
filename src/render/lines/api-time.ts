@@ -1,5 +1,6 @@
 // src/render/lines/api-time.ts
 import { color } from "../colors.js";
+import { glyph } from "../glyphs.js";
 import type { RenderContext } from "../../types.js";
 
 export function renderApiTime(ctx: RenderContext): string | null {
@@ -9,7 +10,7 @@ export function renderApiTime(ctx: RenderContext): string | null {
 
   const apiMs = ctx.stdin.cost?.total_api_duration_ms;
   if (typeof apiMs === "number" && apiMs > 0) {
-    return `${color(c.label, "API")} ${color(c.apiTime, `⏱ ${formatDuration(apiMs)}`)}`;
+    return `${color(c.label, "API")} ${color(c.apiTime, `${glyph("clock", ctx.config.display.glyphs)} ${formatDuration(apiMs)}`)}`;
   }
   return null;
 }

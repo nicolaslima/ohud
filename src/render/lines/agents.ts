@@ -1,4 +1,5 @@
 import { color } from "../colors.js";
+import { glyph } from "../glyphs.js";
 import type { RenderContext } from "../../types.js";
 
 export function renderAgents(ctx: RenderContext): string | null {
@@ -7,7 +8,7 @@ export function renderAgents(ctx: RenderContext): string | null {
   if (agents.length === 0) return null;
   const c = ctx.config.colors;
   const parts = agents.map((a) => {
-    const sym = a.status === "running" ? "◐" : "✓";
+    const sym = a.status === "running" ? glyph("running", ctx.config.display.glyphs) : glyph("done", ctx.config.display.glyphs);
     const modelTag = a.model ? ` [${a.model}]` : "";
     const desc = a.description ? `: ${a.description}` : "";
     const elapsed = a.endTime ? "" : ` (${formatElapsed(a.startTime)})`;

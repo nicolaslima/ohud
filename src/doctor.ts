@@ -18,7 +18,7 @@ const CONSUMED_FLAGS = new Set([
   "usageBarEnabled", "usageCompact", "showResetLabel", "timeFormat", "sevenDayThreshold",
   "externalUsagePath", "externalUsageFreshnessMs", "showCost", "showPromptCache",
   "promptCacheTtlSeconds", "showTools", "showAgents", "showTodos", "showConfigCounts",
-  "showDuration", "showSpeed", "showMemoryUsage", "showEffortLevel",
+  "showDuration", "showSpeed", "showMemoryUsage", "showEffortLevel", "glyphs",
   // GitStatus flags read by render/lines/project.ts
   "showAheadBehind", "pushWarningThreshold", "pushCriticalThreshold",
 ]);
