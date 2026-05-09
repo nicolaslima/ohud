@@ -39,7 +39,7 @@ function makeCtx(overrides: Partial<RenderContext> & { stdin?: Partial<StdinData
       current_dir: "/Users/lima/Projects/ohud",
       project_dir: "/Users/lima/Projects/ohud",
     },
-    context_window: { context_window_size: 200000, used_percentage: 15 },
+    context_window: { context_window_size: 1_000_000, used_percentage: 15 },
     cost: { total_cost_usd: 0.01, total_duration_ms: 60000 },
     ...stdinOverride,
   };
@@ -142,7 +142,7 @@ describe("Idle state", () => {
   });
 
   test("sentence reads as prose: 'ohud on {branch} using {model} with context N% used'", () => {
-    const ctx = makeCtx({ stdin: { context_window: { used_percentage: 15 } } });
+    const ctx = makeCtx({ stdin: { context_window: { used_percentage: 15, context_window_size: 1_000_000 } } });
     const cells = collectCells([projectWidget, contextWidget], ctx);
     const [line1] = hushLayout.pack(cells, 200, ctx.config);
     const plain = stripAnsi(line1!);

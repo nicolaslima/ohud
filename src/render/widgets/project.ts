@@ -71,7 +71,8 @@ export const projectWidget: Widget = {
     // --- Sub-cell 3: model label (no link in prose design) ---
     if (ctx.config.display.showModel) {
       const rawId = ctx.stdin.model?.id ?? "";
-      const modelLabel = formatModelLabel(rawId);
+      const cwSize = ctx.stdin.context_window?.context_window_size;
+      const modelLabel = formatModelLabel(rawId, cwSize);
       if (modelLabel) {
         cells.push({
           subId: "model",
@@ -175,36 +176,42 @@ export function condenseModelId(nameOrId: string): string {
   return s;
 }
 
-// Default context-window sizes by model family (when no explicit suffix found).
-// Keys are matched against the lowercased first word segment of the name after
-// stripping the "claude-" prefix.
-const DEFAULT_CONTEXT: Record<string, string> = {
-  // Anthropic
-  opus:   "1M",
-  sonnet: "200K",
-  haiku:  "200K",
-  // Ollama Cloud — context windows from the published model cards.
-  kimi:    "1M",
-  qwen3:   "256K",
-  glm:     "128K",
-  gpt:     "128K",
-  deepseek:"128K",
-  llama:   "128K",
-  mistral: "128K",
-};
+/**
+ * Format a context-window byte/token count into a human label.
+ * 1_000_000 → "1M"  ;  200_000 → "200K"  ;  262_144 → "262K".
+ * Returns null for invalid / non-positive values.
+ */
+function formatContextSize(size: number | null | undefined): string | null {
+  if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) return null;
+  if (size >= 1_000_000) {
+    const m = size / 1_000_000;
+    // 1M, 1.5M, 2M — at most one decimal, trimmed.
+    return (Math.round(m * 10) / 10).toString().replace(/\.0$/, "") + "M";
+  }
+  // K-range: round to nearest thousand to absorb minor variance (262144 → 262K).
+  return `${Math.round(size / 1000)}K`;
+}
 
 /**
  * Format a model id into a friendly label with explicit context-window suffix.
  *
- *   "claude-opus-4-7-1m"       → "Opus 4.7 (1M)"
- *   "claude-opus-4-7"          → "Opus 4.7 (1M)"   ← default lookup
- *   "claude-sonnet-4-6"        → "Sonnet 4.6 (200K)"
- *   "claude-haiku-4-5-20251001"→ "Haiku 4.5 (200K)" ← date stamp stripped
- *   "kimi-k2-6-262k"           → "Kimi K2.6 (262K)"
- *   "gpt-oss-20b-128k"         → "Gpt-Oss 20B (128K)"
- *   "something-weird"          → "something-weird"  ← passthrough
+ * The context-window source order (first wins):
+ *   1. `contextWindowSize` arg — Claude Code stdin's authoritative value.
+ *   2. Trailing "-<N>(k|m)" suffix in the id (e.g. "-1m", "-262k").
+ *   3. None — emits the bare friendly name with no parens.
+ *
+ * Examples:
+ *   formatModelLabel("claude-opus-4-7", 1_000_000)  → "Opus 4.7 (1M)"
+ *   formatModelLabel("claude-haiku-4-5", 200_000)   → "Haiku 4.5 (200K)"
+ *   formatModelLabel("kimi-k2.6:cloud", 262_144)    → "Kimi K2.6 (262K)"
+ *   formatModelLabel("kimi-k2-6-262k")              → "Kimi K2.6 (262K)"
+ *   formatModelLabel("kimi-k2.6:cloud")             → "Kimi K2.6"
+ *   formatModelLabel("something-weird")             → "something-weird" ← passthrough
+ *
+ * No hardcoded per-family context-size table: model providers change
+ * windows, and stdin already carries the truth on every tick.
  */
-export function formatModelLabel(nameOrId: string): string {
+export function formatModelLabel(nameOrId: string, contextWindowSize?: number | null): string {
   let s = nameOrId.trim();
   if (!s) return s;
 
@@ -282,15 +289,19 @@ export function formatModelLabel(nameOrId: string): string {
 
   const friendlyName = [wordPrefix, versionSuffix].filter(Boolean).join(" ");
 
-  // Step 5: If no explicit context suffix, look up by model family (first word segment).
-  if (contextLabel === null) {
-    const firstWord = (wordSegs[0] ?? segments[0] ?? "").toLowerCase();
-    contextLabel = DEFAULT_CONTEXT[firstWord] ?? null;
-  }
+  // Step 5: stdin takes precedence over the id-suffix when provided —
+  // it's the model provider's authoritative current context window for the
+  // active session, while the id suffix can drift (e.g. id stays the same
+  // when the provider extends a model's context).
+  const stdinLabel = formatContextSize(contextWindowSize);
+  if (stdinLabel !== null) contextLabel = stdinLabel;
 
   // Step 6: Compose final label.
   if (contextLabel) return `${friendlyName} (${contextLabel})`;
-  // Passthrough: no family match and no explicit suffix — return original.
+  // No reliable context size: passthrough the original id rather than emit
+  // a friendly-cased version. Friendly-casing without context size leaves
+  // the user wondering "why was this transformed?" — better to be honest
+  // about what we don't know.
   return nameOrId.trim();
 }
 

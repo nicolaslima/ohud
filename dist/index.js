@@ -593,7 +593,8 @@ var projectWidget = {
     }
     if (ctx.config.display.showModel) {
       const rawId = ctx.stdin.model?.id ?? "";
-      const modelLabel = formatModelLabel(rawId);
+      const cwSize = ctx.stdin.context_window?.context_window_size;
+      const modelLabel = formatModelLabel(rawId, cwSize);
       if (modelLabel) {
         cells.push({
           subId: "model",
@@ -679,19 +680,16 @@ function condenseModelId(nameOrId) {
   s = s.replace(/(\d)-(\d)/g, "$1.$2").toLowerCase();
   return s;
 }
-var DEFAULT_CONTEXT = {
-  opus: "1M",
-  sonnet: "200K",
-  haiku: "200K",
-  kimi: "1M",
-  qwen3: "256K",
-  glm: "128K",
-  gpt: "128K",
-  deepseek: "128K",
-  llama: "128K",
-  mistral: "128K"
-};
-function formatModelLabel(nameOrId) {
+function formatContextSize(size) {
+  if (typeof size !== "number" || !Number.isFinite(size) || size <= 0)
+    return null;
+  if (size >= 1e6) {
+    const m = size / 1e6;
+    return (Math.round(m * 10) / 10).toString().replace(/\.0$/, "") + "M";
+  }
+  return `${Math.round(size / 1000)}K`;
+}
+function formatModelLabel(nameOrId, contextWindowSize) {
   let s = nameOrId.trim();
   if (!s)
     return s;
@@ -730,10 +728,9 @@ function formatModelLabel(nameOrId) {
   }
   const versionSuffix = versionTokens.join(" ");
   const friendlyName = [wordPrefix, versionSuffix].filter(Boolean).join(" ");
-  if (contextLabel === null) {
-    const firstWord = (wordSegs[0] ?? segments[0] ?? "").toLowerCase();
-    contextLabel = DEFAULT_CONTEXT[firstWord] ?? null;
-  }
+  const stdinLabel = formatContextSize(contextWindowSize);
+  if (stdinLabel !== null)
+    contextLabel = stdinLabel;
   if (contextLabel)
     return `${friendlyName} (${contextLabel})`;
   return nameOrId.trim();

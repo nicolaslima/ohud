@@ -913,20 +913,37 @@ test("formatModelLabel: claude-opus-4-7-1m → Opus 4.7 (1M)", () => {
   expect(formatModelLabel("claude-opus-4-7-1m")).toBe("Opus 4.7 (1M)");
 });
 
-test("formatModelLabel: claude-opus-4-7 → Opus 4.7 (1M) (default lookup)", () => {
-  expect(formatModelLabel("claude-opus-4-7")).toBe("Opus 4.7 (1M)");
+test("formatModelLabel: claude-opus-4-7 with stdin cwSize=1M → Opus 4.7 (1M)", () => {
+  expect(formatModelLabel("claude-opus-4-7", 1_000_000)).toBe("Opus 4.7 (1M)");
 });
 
-test("formatModelLabel: claude-sonnet-4-6 → Sonnet 4.6 (200K)", () => {
-  expect(formatModelLabel("claude-sonnet-4-6")).toBe("Sonnet 4.6 (200K)");
+test("formatModelLabel: claude-opus-4-7 without cwSize → passthrough (no parens)", () => {
+  expect(formatModelLabel("claude-opus-4-7")).toBe("claude-opus-4-7");
 });
 
-test("formatModelLabel: claude-haiku-4-5 → Haiku 4.5 (200K)", () => {
-  expect(formatModelLabel("claude-haiku-4-5")).toBe("Haiku 4.5 (200K)");
+test("formatModelLabel: claude-sonnet-4-6 with stdin cwSize=200K → Sonnet 4.6 (200K)", () => {
+  expect(formatModelLabel("claude-sonnet-4-6", 200_000)).toBe("Sonnet 4.6 (200K)");
 });
 
-test("formatModelLabel: claude-haiku-4-5-20251001 → Haiku 4.5 (200K) (date stamp stripped)", () => {
-  expect(formatModelLabel("claude-haiku-4-5-20251001")).toBe("Haiku 4.5 (200K)");
+test("formatModelLabel: claude-haiku-4-5 with stdin cwSize=200K → Haiku 4.5 (200K)", () => {
+  expect(formatModelLabel("claude-haiku-4-5", 200_000)).toBe("Haiku 4.5 (200K)");
+});
+
+test("formatModelLabel: claude-haiku-4-5-20251001 with cwSize=200K → Haiku 4.5 (200K)", () => {
+  expect(formatModelLabel("claude-haiku-4-5-20251001", 200_000)).toBe("Haiku 4.5 (200K)");
+});
+
+test("formatModelLabel: stdin cwSize wins over id suffix when both present", () => {
+  // id says -1m, stdin says 200K → stdin wins
+  expect(formatModelLabel("claude-opus-4-7-1m", 200_000)).toBe("Opus 4.7 (200K)");
+});
+
+test("formatModelLabel: kimi-k2.6:cloud with stdin cwSize=262144 → Kimi K2.6 (262K)", () => {
+  expect(formatModelLabel("kimi-k2.6:cloud", 262_144)).toBe("Kimi K2.6 (262K)");
+});
+
+test("formatModelLabel: kimi-k2.6:cloud without cwSize → passthrough", () => {
+  expect(formatModelLabel("kimi-k2.6:cloud")).toBe("kimi-k2.6:cloud");
 });
 
 test("formatModelLabel: kimi-k2-6-262k → Kimi K2.6 (262K)", () => {
