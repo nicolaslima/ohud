@@ -42,14 +42,17 @@ export const projectWidget: Widget = {
     // --- Sub-cell 2: git branch (green=clean, yellow=dirty, OSC 8 → remote URL if detectable) ---
     if (ctx.config.gitStatus.enabled && ctx.gitStatus) {
       const dirty = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty;
-      const branchText = ctx.gitStatus.branch + (dirty ? "*" : "");
+      const dirtyMark = dirty
+        ? (ctx.config.display.glyphs === "ascii" ? " *" : " ●")
+        : "";
+      const branchText = ctx.gitStatus.branch + dirtyMark;
       const attention = dirty ? "warning" : "normal";
       const branchLink = remoteUrlToHttp(ctx.gitStatus.remoteUrl);
       cells.push({
         group: "header",
         text: branchText,
         attention,
-        baseColor: dirty ? undefined : "green", // warning overrides to yellow; clean uses green
+        baseColor: dirty ? undefined : "green",
         link: branchLink,
       });
     }
@@ -150,12 +153,15 @@ function effortBlock(ctx: RenderContext): string {
 }
 
 /** Condense a model display_name or id to a compact label.
+ *  "claude-opus-4-7-1m" → "opus-4.7"  (strips context-window suffix first)
  *  "claude-opus-4-7" → "opus-4.7"
  *  "Claude Opus 4.7" → "opus-4.7" (lowercase, strip "claude ")
  *  Anything else returned as-is. */
-function condenseModelId(nameOrId: string): string {
-  // Strip leading "claude-" or "claude " prefix
+export function condenseModelId(nameOrId: string): string {
   let s = nameOrId.trim();
+  // Strip context-window suffix FIRST: -1m, [1m], -200k, [200k], etc.
+  s = s.replace(/(-?(\[)?(\d+m|\d+k)\]?)$/i, "");
+  // Strip leading "claude-" or "claude " prefix
   if (s.toLowerCase().startsWith("claude-")) s = s.slice(7);
   else if (s.toLowerCase().startsWith("claude ")) s = s.slice(7);
   // Replace hyphens-between-digits with dots: "opus-4-7" → "opus-4.7"

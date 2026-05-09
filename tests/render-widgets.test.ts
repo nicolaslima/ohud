@@ -19,6 +19,7 @@ import { memoryWidget } from "../src/render/widgets/memory.js";
 import { durationWidget } from "../src/render/widgets/duration.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
+import type { HushCell } from "../src/render/widget.js";
 
 const fx = (n: string) => JSON.parse(readFileSync(join(import.meta.dir, "fixtures", n), "utf8")) as StdinData;
 
@@ -607,6 +608,223 @@ test("usage line omits reset label when showResetLabel=false", () => {
   };
   const out = renderBody(usageWidget, ctx);
   expect(out).not.toMatch(/resets/);
+});
+
+// ---------------------------------------------------------------------------
+// Hush renderHush tests — new information design behaviors
+// ---------------------------------------------------------------------------
+
+test("project renderHush — dirty marker uses ● in unicode mode", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.glyphs = "unicode";
+  ctx.config.gitStatus.showDirty = true;
+  ctx.gitStatus = { branch: "develop", dirty: true, ahead: 0, behind: 0 };
+  const cells = projectWidget.renderHush!(ctx) as HushCell[];
+  const branchCell = cells.find((c) => c.text.includes("develop"));
+  expect(branchCell?.text).toBe("develop ●");
+});
+
+test("project renderHush — dirty marker uses ' *' in ascii mode", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.glyphs = "ascii";
+  ctx.config.gitStatus.showDirty = true;
+  ctx.gitStatus = { branch: "main", dirty: true, ahead: 0, behind: 0 };
+  const cells = projectWidget.renderHush!(ctx) as HushCell[];
+  const branchCell = cells.find((c) => c.text.includes("main"));
+  expect(branchCell?.text).toBe("main *");
+});
+
+test("project renderHush — model strips [1m] suffix: claude-opus-4-7-1m → opus-4.7", () => {
+  const stdin: StdinData = { model: { id: "claude-opus-4-7-1m" }, workspace: { current_dir: "/x" } };
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.gitStatus = null;
+  const cells = projectWidget.renderHush!(ctx) as HushCell[];
+  const modelCell = cells.find((c) => c.group === "header" && c.text.includes("opus"));
+  expect(modelCell?.text).toBe("opus-4.7");
+});
+
+test("context renderHush — appends capacity when context_window_size > 200k", () => {
+  const stdin: StdinData = {
+    context_window: { used_percentage: 39, context_window_size: 1_000_000 },
+  };
+  const ctx = makeCtx(stdin, "anthropic");
+  const cell = contextWidget.renderHush!(ctx) as HushCell | null;
+  expect(cell?.text).toBe("39% of 1M");
+});
+
+test("context renderHush — no capacity suffix when context_window_size ≤ 200k", () => {
+  const stdin: StdinData = {
+    context_window: { used_percentage: 45, context_window_size: 200_000 },
+  };
+  const ctx = makeCtx(stdin, "anthropic");
+  const cell = contextWidget.renderHush!(ctx) as HushCell | null;
+  expect(cell?.text).toBe("45%");
+});
+
+test("context renderHush — 500k rounds to 500k", () => {
+  const stdin: StdinData = {
+    context_window: { used_percentage: 20, context_window_size: 500_000 },
+  };
+  const ctx = makeCtx(stdin, "anthropic");
+  const cell = contextWidget.renderHush!(ctx) as HushCell | null;
+  expect(cell?.text).toBe("20% of 500k");
+});
+
+test("usage renderHush — new format rate 79%/5h", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.usageData = { fiveHour: 79, sevenDay: null, fiveHourResetAt: null, sevenDayResetAt: null };
+  const cell = usageWidget.renderHush!(ctx) as HushCell | null;
+  expect(cell?.text).toContain("rate 79%/5h");
+});
+
+test("usage renderHush — 7d uses quota N%/7d format", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.sevenDayThreshold = 0;
+  ctx.usageData = { fiveHour: 60, sevenDay: 45, fiveHourResetAt: null, sevenDayResetAt: null };
+  const cell = usageWidget.renderHush!(ctx) as HushCell | null;
+  expect(cell?.text).toContain("quota 45%/7d");
+});
+
+test("duration renderHush — suppressed when < 4h", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  stdin.cost = { total_duration_ms: 3 * 60 * 60 * 1000 - 1 }; // 3h59m59.999s
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showDuration = true;
+  const cell = durationWidget.renderHush!(ctx) as HushCell | null;
+  expect(cell).toBeNull();
+});
+
+test("duration renderHush — shown when ≥ 4h with compact format 4h0m", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  stdin.cost = { total_duration_ms: 4 * 60 * 60 * 1000 }; // exactly 4h
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showDuration = true;
+  const cell = durationWidget.renderHush!(ctx) as HushCell | null;
+  expect(cell).not.toBeNull();
+  expect(cell?.text).toBe("4h");
+});
+
+test("duration renderHush — compact format 15h45m (no internal space)", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  stdin.cost = { total_duration_ms: (15 * 60 + 45) * 60 * 1000 };
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showDuration = true;
+  const cell = durationWidget.renderHush!(ctx) as HushCell | null;
+  expect(cell?.text).toBe("15h45m");
+  expect(cell?.text).not.toContain(" "); // no space inside
+});
+
+test("duration renderHush — group is 'activity' (not 'metrics')", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  stdin.cost = { total_duration_ms: 5 * 60 * 60 * 1000 };
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showDuration = true;
+  const cell = durationWidget.renderHush!(ctx) as HushCell | null;
+  expect(cell?.group).toBe("activity");
+});
+
+test("tools renderHush — count ≥ 100 shows '100+'", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTools = true;
+  const doneBatch: typeof ctx.transcript.tools = Array.from({ length: 105 }, (_, i) => ({
+    id: `d${i}`,
+    name: "Read",
+    status: "completed" as const,
+    startTime: new Date(),
+  }));
+  ctx.transcript.tools = doneBatch;
+  const cells = toolsWidget.renderHush!(ctx) as HushCell[] | null;
+  const readCell = cells?.find((c) => c.text.includes("Read"));
+  expect(readCell?.text).toContain("100+");
+});
+
+test("tools renderHush — target appended when count === 1 and target present", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTools = true;
+  ctx.transcript.tools = [
+    { id: "1", name: "Edit", target: "/path/to/auth.ts", status: "running", startTime: new Date() },
+  ];
+  const cells = toolsWidget.renderHush!(ctx) as HushCell[] | null;
+  const editCell = cells?.find((c) => c.text.includes("Edit"));
+  expect(editCell?.text).toContain("auth.ts");
+  expect(editCell?.text).not.toContain("/path/to/");
+});
+
+test("tools renderHush — no target suffix when count > 1 (same name)", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTools = true;
+  ctx.transcript.tools = [
+    { id: "1", name: "Edit", target: "foo.ts", status: "running", startTime: new Date() },
+    { id: "2", name: "Edit", target: "foo.ts", status: "running", startTime: new Date() },
+  ];
+  const cells = toolsWidget.renderHush!(ctx) as HushCell[] | null;
+  const editCell = cells?.find((c) => c.text.startsWith("Edit"));
+  expect(editCell?.text).toContain("×2");
+  // When count > 1 with same target, no target suffix (only count)
+  // (target dropped because grouped as count=2, count !== 1)
+  expect(editCell?.text).not.toContain("foo.ts");
+});
+
+test("tools renderHush — elapsed > 30s appended, no warning below 120s", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTools = true;
+  ctx.transcript.tools = [
+    { id: "1", name: "Bash", status: "running", startTime: new Date(Date.now() - 45_000) },
+  ];
+  const cells = toolsWidget.renderHush!(ctx) as HushCell[] | null;
+  const bashCell = cells?.find((c) => c.text.includes("Bash"));
+  expect(bashCell?.text).toMatch(/\(45s|\(44s|\(46s/); // allow 1s jitter
+  expect(bashCell?.attention).toBe("normal");
+});
+
+test("tools renderHush — elapsed > 120s sets attention: warning", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTools = true;
+  ctx.transcript.tools = [
+    { id: "1", name: "Bash", status: "running", startTime: new Date(Date.now() - 150_000) },
+  ];
+  const cells = toolsWidget.renderHush!(ctx) as HushCell[] | null;
+  const bashCell = cells?.find((c) => c.text.includes("Bash"));
+  expect(bashCell?.attention).toBe("warning");
+});
+
+test("agents renderHush — model shown as '· opus-4.7' dim inline (no brackets)", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showAgents = true;
+  ctx.transcript.agents = [
+    { id: "1", type: "explore", model: "claude-opus-4-7", status: "running", startTime: new Date() },
+  ];
+  const cells = agentsWidget.renderHush!(ctx) as HushCell[] | null;
+  const cell = cells?.[0];
+  // Should contain "· opus-4.7" not "[opus-4.7]"
+  expect(cell?.text).toContain("· opus-4.7");
+  expect(cell?.text).not.toContain("[opus-4.7]");
+});
+
+test("agents renderHush — count ≥ 100 shows '100+' in completed", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showAgents = true;
+  ctx.transcript.agents = Array.from({ length: 102 }, (_, i) => ({
+    id: `a${i}`,
+    type: "explore",
+    status: "completed" as const,
+    startTime: new Date(),
+    endTime: new Date(),
+  }));
+  const cells = agentsWidget.renderHush!(ctx) as HushCell[] | null;
+  const exploreCell = cells?.find((c) => c.text.includes("explore"));
+  expect(exploreCell?.text).toContain("100+");
 });
 
 // Integration tests for render orchestrator

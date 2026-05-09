@@ -34,9 +34,9 @@ export const usageWidget: Widget = {
     if (fiveHourPct < 50 && sevenDayPct < 50) return null;
 
     const parts: string[] = [];
-    if (fiveHour !== null) parts.push(`5h ${fiveHour}%`);
+    if (fiveHour !== null) parts.push(`rate ${fiveHour}%/5h`);
     if (sevenDay !== null && sevenDay >= ctx.config.display.sevenDayThreshold) {
-      parts.push(`7d ${sevenDay}%`);
+      parts.push(`quota ${sevenDay}%/7d`);
     }
     if (parts.length === 0) return null;
 

@@ -4,6 +4,7 @@ import type { RenderContext, AgentEntry } from "../../types.js";
 import { color } from "../colors.js";
 import { glyph } from "../glyphs.js";
 import { maxLineWidth } from "./_util.js";
+import { condenseModelId } from "./project.js";
 
 export const agentsWidget: Widget = {
   id: "agents",
@@ -31,11 +32,16 @@ export const agentsWidget: Widget = {
 
     // Running agents: one cell per agent, with spinner animation
     for (const a of running) {
-      const modelTag = a.model ? ` [${a.model}]` : "";
+      const elapsedMs = Date.now() - a.startTime.getTime();
+      const modelLabel = a.model ? condenseModelId(a.model) : null;
+      // Model as dim inline suffix instead of bracketed tag
+      const modelSuffix = modelLabel ? ` \x1b[2m· ${modelLabel}\x1b[22m` : "";
+      const elapsedSuffix = elapsedMs > 30_000 ? ` (${formatElapsedSec(elapsedMs)})` : "";
+      const attention = elapsedMs > 120_000 ? "warning" : "normal";
       cells.push({
         group: "activity",
-        text: `${a.type}${modelTag}`,
-        attention: "normal",
+        text: `${a.type}${modelSuffix}${elapsedSuffix}`,
+        attention,
         baseColor: "cyan",
         animate: "spinner",
       });
@@ -44,7 +50,8 @@ export const agentsWidget: Widget = {
     // Completed agents: tally by type, dim green
     const tally = countByType(completed);
     for (const [type, count] of tally) {
-      const countSuffix = count > 1 ? ` ×${count}` : "";
+      const cappedCount = capCount(count);
+      const countSuffix = count > 1 ? ` ×${cappedCount}` : "";
       cells.push({
         group: "activity",
         text: `✓ ${type}${countSuffix}`,
@@ -106,6 +113,17 @@ function countByType(entries: AgentEntry[]): Map<string, number> {
   const m = new Map<string, number>();
   for (const e of entries) m.set(e.type, (m.get(e.type) ?? 0) + 1);
   return m;
+}
+
+function capCount(n: number): string {
+  return n >= 100 ? "100+" : String(n);
+}
+
+function formatElapsedSec(ms: number): string {
+  const sec = Math.floor(ms / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}m${s}s` : `${s}s`;
 }
 
 function formatElapsed(start: Date): string {

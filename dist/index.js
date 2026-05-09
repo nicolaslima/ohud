@@ -3,9 +3,9 @@ import { createRequire } from "node:module";
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // src/index.ts
-import { homedir as homedir3 } from "node:os";
-import { join as join4 } from "node:path";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { join as join5 } from "node:path";
+import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync3 } from "node:fs";
 
 // src/stdin.ts
 var DEFAULT_FIRST_BYTE_TIMEOUT_MS = 250;
@@ -173,13 +173,16 @@ async function probeOllama(opts) {
 }
 
 // src/doctor.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
-import { homedir } from "node:os";
-import { join as join2 } from "node:path";
+import { existsSync as existsSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join3 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/config.ts
 import { readFile } from "node:fs/promises";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join as join2 } from "node:path";
 var DEFAULT_CONFIG = {
   lineLayout: "expanded",
   pathLevels: 1,
@@ -226,7 +229,7 @@ var DEFAULT_CONFIG = {
     showEffortLevel: true,
     glyphs: "auto",
     layout: "row",
-    hush: { compactWhenIdle: true, hyperlinks: true, animate: true }
+    hush: { compactWhenIdle: true, hyperlinks: true, animate: true, density: "compact", identityColors: false }
   },
   gitStatus: {
     enabled: true,
@@ -269,6 +272,16 @@ function deepMerge(base, override) {
   }
   return result;
 }
+function logParseError(configPath, message) {
+  try {
+    const logDir = join2(homedir(), ".claude/plugins/ohud");
+    mkdirSync(logDir, { recursive: true });
+    const logPath = join2(logDir, "last-errors.log");
+    const stamp = new Date().toISOString();
+    appendFileSync(logPath, `[${stamp}] parse error: ${message} (file: ${configPath})
+`);
+  } catch {}
+}
 async function loadConfig(path) {
   const base = structuredClone(DEFAULT_CONFIG);
   let raw;
@@ -280,40 +293,48 @@ async function loadConfig(path) {
   let parsed;
   try {
     parsed = JSON.parse(raw);
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logParseError(path, msg);
     return base;
   }
   return deepMerge(base, parsed);
 }
 
 // src/doctor.ts
-var CONSUMED_FLAGS = new Set([
-  "showModel",
-  "showContextBar",
-  "contextValue",
-  "showApiTime",
-  "showUsage",
-  "usageBarEnabled",
-  "usageCompact",
-  "showResetLabel",
-  "timeFormat",
-  "sevenDayThreshold",
-  "externalUsagePath",
-  "externalUsageFreshnessMs",
-  "showCost",
-  "showPromptCache",
-  "promptCacheTtlSeconds",
-  "showTools",
-  "showAgents",
-  "showTodos",
-  "showConfigCounts",
-  "showDuration",
-  "showSpeed",
-  "showMemoryUsage",
-  "showEffortLevel",
-  "glyphs",
-  "layout",
-  "hush",
+var FLAG_LAYOUT = {
+  showModel: "both",
+  showContextBar: "both",
+  contextValue: "both",
+  showApiTime: "both",
+  showUsage: "both",
+  showEffortLevel: "both",
+  glyphs: "both",
+  layout: "both",
+  hush: "both",
+  usageBarEnabled: "row",
+  usageCompact: "row",
+  showResetLabel: "row",
+  showCost: "row",
+  showMemoryUsage: "row",
+  showSpeed: "row",
+  showPromptCache: "both",
+  showTools: "both",
+  showAgents: "both",
+  showTodos: "both",
+  showDuration: "both",
+  showConfigCounts: "both",
+  timeFormat: "both",
+  sevenDayThreshold: "both",
+  warningThreshold: "both",
+  criticalThreshold: "both",
+  externalUsagePath: "both",
+  externalUsageFreshnessMs: "both",
+  promptCacheTtlSeconds: "both"
+};
+var GIT_CONSUMED = new Set([
+  "enabled",
+  "showDirty",
   "showAheadBehind",
   "pushWarningThreshold",
   "pushCriticalThreshold"
@@ -340,14 +361,31 @@ async function runDoctor(opts) {
   lines.push(`Active layout: ${activeLayout}`);
   lines.push(`Daemon probe: ${probe.daemonOk ? "ok" : "fail"}`);
   lines.push(`Mode resolution rule: model.id starts with "claude-" → anthropic; ` + `otherwise → ollama; missing → daemon-probe fallback (currently ` + `${probe.daemonOk ? "ollama" : "anthropic"}).`);
+  const lastModePath = join3(homedir2(), ".claude/plugins/ohud/last-mode.json");
+  if (existsSync2(lastModePath)) {
+    try {
+      const raw = readFileSync2(lastModePath, "utf8");
+      const parsed = JSON.parse(raw);
+      const modeStr = parsed.mode ?? "unknown";
+      const modelPart = parsed.modelId ? ` (model.id=${parsed.modelId})` : "";
+      lines.push(`Last rendered mode: ${modeStr}${modelPart}`);
+    } catch {}
+  }
   if (activeLayout === "hush") {
     const h = cfg.display.hush ?? {};
     lines.push(`Hush config: compactWhenIdle=${h.compactWhenIdle ?? true}, hyperlinks=${h.hyperlinks ?? true}, animate=${h.animate ?? true}`);
   }
+  const { annotations, warnings } = buildFlagAnnotations(cfg, activeLayout);
   lines.push(`
 active config flags (consumed?):`);
-  lines.push(renderFlagAnnotations(cfg));
-  const errLog = join2(homedir(), ".claude/plugins/ohud/last-errors.log");
+  lines.push(annotations);
+  if (warnings.length > 0) {
+    lines.push(`
+lint warnings:`);
+    for (const w of warnings)
+      lines.push(`  ${w}`);
+  }
+  const errLog = join3(homedir2(), ".claude/plugins/ohud/last-errors.log");
   if (existsSync2(errLog)) {
     lines.push(`
 last errors (${errLog}):`);
@@ -360,27 +398,52 @@ last errors (${errLog}):`);
   return lines.join(`
 `);
 }
-function renderFlagAnnotations(cfg) {
+function buildFlagAnnotations(cfg, activeLayout) {
   const out = [];
+  const warnings = [];
   for (const [k, v] of Object.entries(cfg.display)) {
-    const tag = CONSUMED_FLAGS.has(k) ? "consumed" : "DEAD FLAG";
+    const affinity = FLAG_LAYOUT[k];
+    let tag;
+    if (!affinity) {
+      tag = "unknown flag";
+    } else if (affinity === "both") {
+      tag = "consumed in both";
+    } else if (affinity === "row") {
+      if (activeLayout === "hush") {
+        tag = "silenced — wrong layout";
+        if (v === true) {
+          warnings.push(`⚠ display.${k}: true but layout=hush silences this flag — remove or switch to layout=row`);
+        }
+      } else {
+        tag = "consumed in row";
+      }
+    } else {
+      if (activeLayout === "row") {
+        tag = "silenced — wrong layout";
+        if (v === true) {
+          warnings.push(`⚠ display.${k}: true but layout=row silences this flag — remove or switch to layout=hush`);
+        }
+      } else {
+        tag = "consumed in hush";
+      }
+    }
     out.push(`  display.${k}: ${JSON.stringify(v)} (${tag})`);
   }
   for (const [k, v] of Object.entries(cfg.gitStatus)) {
-    const tag = CONSUMED_FLAGS.has(k) || k === "enabled" || k === "showDirty" ? "consumed" : "DEAD FLAG";
+    const tag = GIT_CONSUMED.has(k) ? "consumed in both" : "unknown flag";
     out.push(`  gitStatus.${k}: ${JSON.stringify(v)} (${tag})`);
   }
-  return out.join(`
-`);
+  return { annotations: out.join(`
+`), warnings };
 }
 function resolveBundlePath() {
   const root = process.env.CLAUDE_PLUGIN_ROOT;
   if (root)
-    return join2(root, "dist", "index.js");
+    return join3(root, "dist", "index.js");
   try {
     return fileURLToPath(import.meta.url);
   } catch {
-    return join2(homedir(), ".claude/plugins/cache/ohud/ohud/0.1.0/dist/index.js");
+    return join3(homedir2(), ".claude/plugins/cache/ohud/ohud/0.1.0/dist/index.js");
   }
 }
 function readPackageJson() {
@@ -391,6 +454,14 @@ function readPackageJson() {
   } catch {
     return { version: "unknown" };
   }
+}
+function writeLastModeState(mode, modelId) {
+  try {
+    const dir = join3(homedir2(), ".claude/plugins/ohud");
+    mkdirSync2(dir, { recursive: true });
+    const path = join3(dir, "last-mode.json");
+    writeFileSync2(path, JSON.stringify({ mode, modelId, updatedAt: new Date().toISOString() }));
+  } catch {}
 }
 
 // src/mode.ts
@@ -965,7 +1036,8 @@ var projectWidget = {
     });
     if (ctx.config.gitStatus.enabled && ctx.gitStatus) {
       const dirty = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty;
-      const branchText = ctx.gitStatus.branch + (dirty ? "*" : "");
+      const dirtyMark = dirty ? ctx.config.display.glyphs === "ascii" ? " *" : " ●" : "";
+      const branchText = ctx.gitStatus.branch + dirtyMark;
       const attention = dirty ? "warning" : "normal";
       const branchLink = remoteUrlToHttp(ctx.gitStatus.remoteUrl);
       cells.push({
@@ -1058,6 +1130,7 @@ function effortBlock(ctx) {
 }
 function condenseModelId(nameOrId) {
   let s = nameOrId.trim();
+  s = s.replace(/(-?(\[)?(\d+m|\d+k)\]?)$/i, "");
   if (s.toLowerCase().startsWith("claude-"))
     s = s.slice(7);
   else if (s.toLowerCase().startsWith("claude "))
@@ -1115,13 +1188,22 @@ var contextWidget = {
     const warn = ctx.config.display.hush?.thresholds?.warning ?? ctx.config.display.warningThreshold;
     const crit = ctx.config.display.hush?.thresholds?.danger ?? ctx.config.display.criticalThreshold;
     const attention = rounded >= crit ? "danger" : rounded >= warn ? "warning" : "muted";
+    const cwSize = ctx.stdin.context_window?.context_window_size;
+    const capacitySuffix = cwSize && cwSize > 200000 ? ` of ${formatCapacity(cwSize)}` : "";
     return {
       group: "metrics",
-      text: `${rounded}%`,
+      text: `${rounded}%${capacitySuffix}`,
       attention
     };
   }
 };
+function formatCapacity(size) {
+  const millions = size / 1e6;
+  if (millions >= 0.95)
+    return `${Math.round(millions)}M`;
+  const hundreds = Math.round(size / 1e5) * 100;
+  return `${hundreds}k`;
+}
 var BAR_WIDTH = 10;
 function renderContext(ctx) {
   if (!ctx.config.display.showContextBar)
@@ -1249,9 +1331,9 @@ var usageWidget = {
       return null;
     const parts = [];
     if (fiveHour !== null)
-      parts.push(`5h ${fiveHour}%`);
+      parts.push(`rate ${fiveHour}%/5h`);
     if (sevenDay !== null && sevenDay >= ctx.config.display.sevenDayThreshold) {
-      parts.push(`7d ${sevenDay}%`);
+      parts.push(`quota ${sevenDay}%/7d`);
     }
     if (parts.length === 0)
       return null;
@@ -1477,10 +1559,12 @@ var durationWidget = {
     const ms = ctx.stdin.cost?.total_duration_ms;
     if (typeof ms !== "number" || ms <= 0)
       return null;
+    if (ms < DURATION_NORMAL_MS)
+      return null;
     const text = formatDurationHush(ms);
-    const attention = ms >= DURATION_DANGER_MS ? "danger" : ms >= DURATION_WARNING_MS ? "warning" : ms >= DURATION_NORMAL_MS ? "normal" : "muted";
+    const attention = ms >= DURATION_DANGER_MS ? "danger" : ms >= DURATION_WARNING_MS ? "warning" : "normal";
     return {
-      group: "metrics",
+      group: "activity",
       text,
       attention
     };
@@ -1491,7 +1575,7 @@ function formatDurationHush(ms) {
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor(totalSec % 3600 / 60);
   if (h > 0 && m > 0)
-    return `${h}h ${m}m`;
+    return `${h}h${m}m`;
   if (h > 0)
     return `${h}h`;
   return `${m}m`;
@@ -1548,19 +1632,25 @@ var toolsWidget = {
     const running = tools.filter((t) => t.status === "running");
     const done = tools.filter((t) => t.status === "completed");
     const cells = [];
-    for (const g of groupByName(running).values()) {
-      const countSuffix = g.count > 1 ? ` ×${g.count}` : "";
+    for (const g of groupByNameHush(running).values()) {
+      const cappedCount = capCount(g.count);
+      const countSuffix = g.count > 1 ? ` ×${cappedCount}` : "";
+      const targetSuffix = g.count === 1 && g.target ? `: ${basename(g.target)}` : "";
+      const elapsedMs = g.mostRecentStart ? Date.now() - g.mostRecentStart.getTime() : 0;
+      const elapsedSuffix = elapsedMs > 30000 ? ` (${formatElapsedSec(elapsedMs)})` : "";
+      const attention = elapsedMs > 120000 ? "warning" : "normal";
       cells.push({
         group: "activity",
-        text: `${g.name}${countSuffix}`,
-        attention: "normal",
+        text: `${g.name}${countSuffix}${targetSuffix}${elapsedSuffix}`,
+        attention,
         baseColor: "cyan",
         animate: "spinner"
       });
     }
     const tally = countByName(done);
     for (const [name, count] of tally) {
-      const countSuffix = count > 1 ? ` ×${count}` : "";
+      const cappedCount = capCount(count);
+      const countSuffix = count > 1 ? ` ×${cappedCount}` : "";
       cells.push({
         group: "activity",
         text: `✓ ${name}${countSuffix}`,
@@ -1571,14 +1661,20 @@ var toolsWidget = {
     return cells.length > 0 ? cells : null;
   }
 };
-function groupByName(entries) {
+function groupByNameHush(entries) {
   const out = new Map;
   for (const t of entries) {
     const existing = out.get(t.name);
-    if (existing)
+    if (existing) {
       existing.count += 1;
-    else
-      out.set(t.name, { name: t.name, count: 1 });
+      if (existing.target !== t.target)
+        existing.target = undefined;
+      if (!existing.mostRecentStart || t.startTime > existing.mostRecentStart) {
+        existing.mostRecentStart = t.startTime;
+      }
+    } else {
+      out.set(t.name, { name: t.name, count: 1, target: t.target, mostRecentStart: t.startTime });
+    }
   }
   return out;
 }
@@ -1587,6 +1683,15 @@ function countByName(entries) {
   for (const e of entries)
     m.set(e.name, (m.get(e.name) ?? 0) + 1);
   return m;
+}
+function capCount(n) {
+  return n >= 100 ? "100+" : String(n);
+}
+function formatElapsedSec(ms) {
+  const sec = Math.floor(ms / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}m${s}s` : `${s}s`;
 }
 function renderTools(ctx) {
   if (!ctx.config.display.showTools)
@@ -1649,18 +1754,23 @@ var agentsWidget = {
     const completed = agents.filter((a) => a.status === "completed");
     const cells = [];
     for (const a of running) {
-      const modelTag = a.model ? ` [${a.model}]` : "";
+      const elapsedMs = Date.now() - a.startTime.getTime();
+      const modelLabel = a.model ? condenseModelId(a.model) : null;
+      const modelSuffix = modelLabel ? ` \x1B[2m· ${modelLabel}\x1B[22m` : "";
+      const elapsedSuffix = elapsedMs > 30000 ? ` (${formatElapsedSec2(elapsedMs)})` : "";
+      const attention = elapsedMs > 120000 ? "warning" : "normal";
       cells.push({
         group: "activity",
-        text: `${a.type}${modelTag}`,
-        attention: "normal",
+        text: `${a.type}${modelSuffix}${elapsedSuffix}`,
+        attention,
         baseColor: "cyan",
         animate: "spinner"
       });
     }
     const tally = countByType(completed);
     for (const [type, count] of tally) {
-      const countSuffix = count > 1 ? ` ×${count}` : "";
+      const cappedCount = capCount2(count);
+      const countSuffix = count > 1 ? ` ×${cappedCount}` : "";
       cells.push({
         group: "activity",
         text: `✓ ${type}${countSuffix}`,
@@ -1712,6 +1822,15 @@ function countByType(entries) {
     m.set(e.type, (m.get(e.type) ?? 0) + 1);
   return m;
 }
+function capCount2(n) {
+  return n >= 100 ? "100+" : String(n);
+}
+function formatElapsedSec2(ms) {
+  const sec = Math.floor(ms / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}m${s}s` : `${s}s`;
+}
 function formatElapsed(start) {
   const sec = Math.floor((Date.now() - start.getTime()) / 1000);
   const m = Math.floor(sec / 60);
@@ -1761,8 +1880,8 @@ function renderTodos(ctx) {
 
 // src/render/widgets/environment.ts
 import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
-import { dirname, join as join3 } from "node:path";
-import { homedir as homedir2 } from "node:os";
+import { dirname, join as join4 } from "node:path";
+import { homedir as homedir3 } from "node:os";
 var environmentWidget = {
   id: "environment",
   group: "activity",
@@ -1795,18 +1914,18 @@ function renderEnvironment(ctx) {
   return color(c.label, parts.join(" | "));
 }
 function countAll(startDir) {
-  const home = homedir2();
+  const home = homedir3();
   let claudeMd = 0;
   let dir = startDir;
   while (dir && dir.length > 1 && dir.startsWith(home)) {
-    if (existsSync3(join3(dir, "CLAUDE.md")))
+    if (existsSync3(join4(dir, "CLAUDE.md")))
       claudeMd += 1;
     const parent = dirname(dir);
     if (parent === dir)
       break;
     dir = parent;
   }
-  const settings = readSettings(join3(home, ".claude/settings.json"));
+  const settings = readSettings(join4(home, ".claude/settings.json"));
   const mcps = Object.keys(settings?.mcpServers ?? {}).length;
   const hooks = countHooks(settings?.hooks);
   const rules = readRules(startDir);
@@ -1830,7 +1949,7 @@ function countHooks(hooks) {
   return n;
 }
 function readRules(startDir) {
-  const path = join3(startDir, ".claude/rules.md");
+  const path = join4(startDir, ".claude/rules.md");
   if (!existsSync3(path))
     return 0;
   try {
@@ -1970,7 +2089,6 @@ function link(text, url, enabled = true) {
 }
 
 // src/render/layout/hush.ts
-var SEP = "  ";
 var SGR_FG = {
   cyan: "36",
   green: "32",
@@ -1980,6 +2098,8 @@ var SGR_FG = {
   red: "31"
 };
 var RESET_FG = "\x1B[39m";
+var MAX_RUNNING = 3;
+var MAX_DONE = 4;
 function applyColor(text, colorName, env) {
   if (isColorDisabled(env))
     return text;
@@ -2012,20 +2132,59 @@ function glyphMode(config, env) {
     return "unicode";
   return "ascii";
 }
+function resolveSeparators(density) {
+  switch (density) {
+    case "comfortable":
+      return { within: " · ", between: "    " };
+    case "airy":
+      return { within: "  ", between: "      " };
+    default:
+      return { within: " ", between: "  " };
+  }
+}
+function effectiveBaseColor(cell, toggles) {
+  if (!cell.baseColor)
+    return;
+  if (cell.group !== "header")
+    return cell.baseColor;
+  return toggles.identityColors ? cell.baseColor : undefined;
+}
 function renderCell(cell, now, mode, env, toggles) {
-  let text = cell.text;
+  const noColor = isColorDisabled(env);
+  let text;
+  if (cell.primaryText !== undefined && cell.secondaryText !== undefined) {
+    const primary = cell.primaryText;
+    const secondary = cell.secondaryText;
+    let primaryStyled = primary;
+    const color2 = effectiveBaseColor(cell, toggles);
+    if (!noColor && color2) {
+      primaryStyled = applyColor(primary, color2, env);
+    }
+    const secondaryStyled = dim(secondary, env);
+    text = `${primaryStyled} ${secondaryStyled}`;
+    if (cell.animate === "spinner" && toggles.animate) {
+      const glyph2 = spinnerFrame(now, mode);
+      text = `${glyph2} ${text}`;
+    }
+    if (cell.link) {
+      text = link(text, cell.link, toggles.hyperlinks);
+    }
+    return text;
+  }
+  text = cell.text;
   if (cell.animate === "spinner" && toggles.animate) {
     const glyph2 = spinnerFrame(now, mode);
     text = `${glyph2} ${text}`;
   }
-  const noColor = isColorDisabled(env);
   switch (cell.attention) {
     case "muted":
-      text = applyDimColor(text, cell.baseColor, env);
+      text = applyDimColor(text, effectiveBaseColor(cell, toggles), env);
       break;
     case "normal":
-      if (!noColor && cell.baseColor) {
-        text = applyColor(text, cell.baseColor, env);
+      {
+        const color2 = effectiveBaseColor(cell, toggles);
+        if (!noColor && color2)
+          text = applyColor(text, color2, env);
       }
       break;
     case "warning":
@@ -2042,6 +2201,60 @@ function renderCell(cell, now, mode, env, toggles) {
   }
   return text;
 }
+function joinCells(renderedPairs, seps) {
+  if (renderedPairs.length === 0)
+    return "";
+  let result = renderedPairs[0].rendered;
+  for (let i = 1;i < renderedPairs.length; i++) {
+    const prev = renderedPairs[i - 1];
+    const curr = renderedPairs[i];
+    const sep = prev.group === curr.group ? seps.within : seps.between;
+    result += sep + curr.rendered;
+  }
+  return result;
+}
+function capActivityCells(cells) {
+  const running = cells.filter((c) => c.animate === "spinner");
+  const done = cells.filter((c) => c.animate !== "spinner");
+  const cappedRunning = running.slice(0, MAX_RUNNING);
+  const cappedDone = done.slice(0, MAX_DONE);
+  const dropped = running.length - cappedRunning.length + (done.length - cappedDone.length);
+  const result = [...cappedRunning, ...cappedDone];
+  if (dropped > 0) {
+    result.push({
+      text: `+${dropped} more`,
+      attention: "muted",
+      group: "activity"
+    });
+  }
+  return result;
+}
+function truncateByPriority(cells, now, mode, env, toggles, seps, termWidth) {
+  const renderPairs = (cs) => cs.map((c) => ({ rendered: renderCell(c, now, mode, env, toggles), group: c.group }));
+  let result = joinCells(renderPairs(cells), seps);
+  if (stripAnsiWidth(result) <= termWidth)
+    return result;
+  const sorted = [...cells].sort((a, b) => {
+    const pa = a.priority ?? 0;
+    const pb = b.priority ?? 0;
+    return pa - pb;
+  });
+  const kept = [...sorted];
+  while (kept.length > 1) {
+    kept.shift();
+    const original = cells.filter((c) => kept.includes(c));
+    result = joinCells(renderPairs(original), seps);
+    if (stripAnsiWidth(result) <= termWidth)
+      return result;
+  }
+  return truncateLine(joinCells(renderPairs(cells.slice(0, 1)), seps), termWidth);
+}
+function stripAnsiWidth(s) {
+  return s.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x07]*\x07[^\x1b]*\x1b\]8;;\x07/g, (m) => {
+    const inner = m.replace(/\x1b\]8;;[^\x07]*\x07/g, "").replace(/\x1b\]8;;\x07/g, "");
+    return inner;
+  }).length;
+}
 var hushLayout = {
   name: "hush",
   pack(cells, termWidth, config) {
@@ -2049,26 +2262,34 @@ var hushLayout = {
     const now = Date.now();
     const env = process.env;
     const mode = glyphMode(config, env);
+    const density = config.display.hush?.density ?? "compact";
+    const seps = resolveSeparators(density);
     const toggles = {
       hyperlinks: config.display.hush?.hyperlinks !== false,
-      animate: config.display.hush?.animate !== false
+      animate: config.display.hush?.animate !== false,
+      identityColors: config.display.hush?.identityColors === true
     };
     const headerCells = hushCells.filter((c) => c.group === "header");
     const metricsCells = hushCells.filter((c) => c.group === "metrics");
     const activityCells = hushCells.filter((c) => c.group === "activity");
-    const line1Parts = [...headerCells, ...metricsCells].map((c) => renderCell(c, now, mode, env, toggles));
-    const line1 = line1Parts.join(SEP);
-    const line2Parts = activityCells.map((c) => renderCell(c, now, mode, env, toggles));
-    const line2 = line2Parts.join(SEP);
+    const cappedActivity = capActivityCells(activityCells);
+    const line1Cells = [...headerCells, ...metricsCells];
+    const line1 = truncateByPriority(line1Cells, now, mode, env, toggles, seps, termWidth);
+    const line2Parts = cappedActivity.map((c) => ({
+      rendered: renderCell(c, now, mode, env, toggles),
+      group: c.group
+    }));
+    const line2Raw = joinCells(line2Parts, seps);
+    const line2 = truncateLine(line2Raw, termWidth);
     const lines = [];
     if (line1)
-      lines.push(truncateLine(line1, termWidth));
+      lines.push(line1);
     const compactWhenIdle = config.display.hush?.compactWhenIdle !== false;
     if (compactWhenIdle) {
       if (line2)
-        lines.push(truncateLine(line2, termWidth));
+        lines.push(line2);
     } else {
-      lines.push(truncateLine(line2, termWidth));
+      lines.push(line2);
     }
     return lines;
   }
@@ -2096,7 +2317,7 @@ function render(ctx) {
       if (!c2)
         return [];
       const arr = Array.isArray(c2) ? c2 : [c2];
-      return arr.map((cell) => ({ ...cell, id: w.id, group: w.group }));
+      return arr.map((cell) => ({ ...cell, id: w.id, group: w.group, priority: cell.priority ?? w.priority }));
     }
     const c = w.render(ctx);
     return c ? [{ ...c, id: w.id, group: w.group }] : [];
@@ -2110,8 +2331,8 @@ function render(ctx) {
 }
 
 // src/index.ts
-var CONFIG_PATH = join4(homedir3(), ".claude/plugins/ohud/config.json");
-mkdirSync(join4(homedir3(), ".claude/plugins/ohud"), { recursive: true });
+var CONFIG_PATH = join5(homedir4(), ".claude/plugins/ohud/config.json");
+mkdirSync3(join5(homedir4(), ".claude/plugins/ohud"), { recursive: true });
 async function main() {
   const T0 = process.hrtime.bigint();
   const profile = process.env.OHUD_PROFILE === "1";
@@ -2141,6 +2362,7 @@ async function main() {
       config.gitStatus.enabled ? getGitStatus(stdin.workspace?.current_dir ?? stdin.cwd) : Promise.resolve(null)
     ]);
     const mode = resolveMode(stdin, probe);
+    writeLastModeState(mode, stdin.model?.id);
     let usageData = null;
     let costData = null;
     if (mode === "anthropic") {
@@ -2176,11 +2398,11 @@ async function main() {
     const msg = err instanceof Error ? err.message : String(err);
     console.log("\x1B[31mohud: error — see /ohud doctor or ~/.claude/plugins/ohud/last-errors.log\x1B[0m");
     try {
-      const logPath = join4(homedir3(), ".claude/plugins/ohud/last-errors.log");
+      const logPath = join5(homedir4(), ".claude/plugins/ohud/last-errors.log");
       const stamp = new Date().toISOString();
       const line = `[${stamp}] ${msg}
 `;
-      appendFileSync(logPath, line);
+      appendFileSync2(logPath, line);
     } catch {}
     console.error("ohud: error", msg);
   }

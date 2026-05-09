@@ -6,9 +6,11 @@ import { glyph } from "../glyphs.js";
 import { basename } from "../path.js";
 import { maxLineWidth } from "./_util.js";
 
-interface RunningGroup {
+interface RunningGroupHush {
   name: string;
   count: number;
+  target?: string;
+  mostRecentStart?: Date;
 }
 
 export const toolsWidget: Widget = {
@@ -33,12 +35,23 @@ export const toolsWidget: Widget = {
     const cells: HushCell[] = [];
 
     // Running tools: one HushCell per unique name group, with spinner animation
-    for (const g of groupByName(running).values()) {
-      const countSuffix = g.count > 1 ? ` ×${g.count}` : "";
+    for (const g of groupByNameHush(running).values()) {
+      const cappedCount = capCount(g.count);
+      const countSuffix = g.count > 1 ? ` ×${cappedCount}` : "";
+      // Append target when exactly one instance and target is known
+      const targetSuffix = g.count === 1 && g.target
+        ? `: ${basename(g.target)}`
+        : "";
+      // Elapsed time suffix when running > 30s
+      const elapsedMs = g.mostRecentStart ? Date.now() - g.mostRecentStart.getTime() : 0;
+      const elapsedSuffix = elapsedMs > 30_000 ? ` (${formatElapsedSec(elapsedMs)})` : "";
+
+      const attention = elapsedMs > 120_000 ? "warning" : "normal";
+
       cells.push({
         group: "activity",
-        text: `${g.name}${countSuffix}`,
-        attention: "normal",
+        text: `${g.name}${countSuffix}${targetSuffix}${elapsedSuffix}`,
+        attention,
         baseColor: "cyan",
         animate: "spinner",
       });
@@ -47,7 +60,8 @@ export const toolsWidget: Widget = {
     // Done tools: static check mark, dim green
     const tally = countByName(done);
     for (const [name, count] of tally) {
-      const countSuffix = count > 1 ? ` ×${count}` : "";
+      const cappedCount = capCount(count);
+      const countSuffix = count > 1 ? ` ×${cappedCount}` : "";
       cells.push({
         group: "activity",
         text: `✓ ${name}${countSuffix}`,
@@ -60,12 +74,21 @@ export const toolsWidget: Widget = {
   },
 };
 
-function groupByName(entries: ToolEntry[]): Map<string, RunningGroup> {
-  const out = new Map<string, RunningGroup>();
+function groupByNameHush(entries: ToolEntry[]): Map<string, RunningGroupHush> {
+  const out = new Map<string, RunningGroupHush>();
   for (const t of entries) {
     const existing = out.get(t.name);
-    if (existing) existing.count += 1;
-    else out.set(t.name, { name: t.name, count: 1 });
+    if (existing) {
+      existing.count += 1;
+      // If targets differ, drop target (ambiguous)
+      if (existing.target !== t.target) existing.target = undefined;
+      // Track most recent start for elapsed calculation
+      if (!existing.mostRecentStart || t.startTime > existing.mostRecentStart) {
+        existing.mostRecentStart = t.startTime;
+      }
+    } else {
+      out.set(t.name, { name: t.name, count: 1, target: t.target, mostRecentStart: t.startTime });
+    }
   }
   return out;
 }
@@ -74,6 +97,18 @@ function countByName(entries: ToolEntry[]): Map<string, number> {
   const m = new Map<string, number>();
   for (const e of entries) m.set(e.name, (m.get(e.name) ?? 0) + 1);
   return m;
+}
+
+/** Cap counts at 100+ for display. */
+function capCount(n: number): string {
+  return n >= 100 ? "100+" : String(n);
+}
+
+function formatElapsedSec(ms: number): string {
+  const sec = Math.floor(ms / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}m${s}s` : `${s}s`;
 }
 
 // ---------------------------------------------------------------------------

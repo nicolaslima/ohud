@@ -34,13 +34,26 @@ export const contextWidget: Widget = {
       rounded >= warn ? "warning" :
       "muted";
 
+    const cwSize = ctx.stdin.context_window?.context_window_size;
+    const capacitySuffix = cwSize && cwSize > 200_000
+      ? ` of ${formatCapacity(cwSize)}`
+      : "";
+
     return {
       group: "metrics",
-      text: `${rounded}%`,
+      text: `${rounded}%${capacitySuffix}`,
       attention,
     };
   },
 };
+
+/** Round context window size to nearest 100k or 1M for display. */
+function formatCapacity(size: number): string {
+  const millions = size / 1_000_000;
+  if (millions >= 0.95) return `${Math.round(millions)}M`;
+  const hundreds = Math.round(size / 100_000) * 100;
+  return `${hundreds}k`;
+}
 
 // ---------------------------------------------------------------------------
 // Row render implementation (moved from src/render/lines/context.ts)

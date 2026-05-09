@@ -25,17 +25,18 @@ export const durationWidget: Widget = {
     if (!ctx.config.display.showDuration && !ctx.config.display.showSpeed) return null;
     const ms = ctx.stdin.cost?.total_duration_ms;
     if (typeof ms !== "number" || ms <= 0) return null;
+    // Suppress when session is under 4 hours — not informative at that scale.
+    if (ms < DURATION_NORMAL_MS) return null;
 
     const text = formatDurationHush(ms);
 
     const attention =
       ms >= DURATION_DANGER_MS   ? "danger" :
       ms >= DURATION_WARNING_MS  ? "warning" :
-      ms >= DURATION_NORMAL_MS   ? "normal" :
-      "muted";
+      "normal";
 
     return {
-      group: "metrics",
+      group: "activity",
       text,
       attention,
     };
@@ -46,7 +47,8 @@ function formatDurationHush(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
-  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  // Compact format: no internal space — disambiguates from usage "5h 79%"
+  if (h > 0 && m > 0) return `${h}h${m}m`;
   if (h > 0) return `${h}h`;
   return `${m}m`;
 }
