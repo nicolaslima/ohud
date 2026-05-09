@@ -1,7 +1,23 @@
 // tests/cost.test.ts
 import { test, expect } from "bun:test";
 import { resolveSessionCost, formatUsd } from "../src/cost.js";
-import type { StdinData, SessionTokens } from "../src/types.js";
+import { renderCost } from "../src/render/lines/cost.js";
+import { DEFAULT_CONFIG } from "../src/config.js";
+import type { RenderContext, StdinData, SessionTokens } from "../src/types.js";
+
+function makeAnthropicCtx(): RenderContext {
+  return {
+    mode: "anthropic",
+    stdin: {},
+    transcript: { tools: [], agents: [], todos: [] },
+    gitStatus: null,
+    config: structuredClone(DEFAULT_CONFIG),
+    usageData: null,
+    costData: null,
+    memoryInfo: null,
+    cloudModels: [],
+  };
+}
 
 test("uses native total_cost_usd when present", () => {
   const stdin: StdinData = { model: { id: "claude-opus-4-7" }, cost: { total_cost_usd: 0.42 } };
@@ -34,4 +50,45 @@ test("formatUsd thresholds", () => {
   expect(formatUsd(2.5)).toBe("$2.50");
   expect(formatUsd(0.123)).toBe("$0.123");
   expect(formatUsd(0.012)).toBe("$0.0120");
+});
+
+test("renderCost: showCost=false + native > 0 → renders (extra-usage signal)", () => {
+  const ctx = makeAnthropicCtx();
+  ctx.config.display.showCost = false;
+  ctx.costData = { totalUsd: 0.42, source: "native" };
+  const out = renderCost(ctx);
+  expect(out).not.toBeNull();
+  expect(out).toContain("$0.42");
+  expect(out).not.toContain("(est)");
+});
+
+test("renderCost: showCost=false + estimate → null (no extra-usage signal)", () => {
+  const ctx = makeAnthropicCtx();
+  ctx.config.display.showCost = false;
+  ctx.costData = { totalUsd: 0.38, source: "estimate" };
+  expect(renderCost(ctx)).toBeNull();
+});
+
+test("renderCost: showCost=false + costData null → null", () => {
+  const ctx = makeAnthropicCtx();
+  ctx.config.display.showCost = false;
+  ctx.costData = null;
+  expect(renderCost(ctx)).toBeNull();
+});
+
+test("renderCost: showCost=false + native = 0 → null (zero is not extra-usage)", () => {
+  const ctx = makeAnthropicCtx();
+  ctx.config.display.showCost = false;
+  ctx.costData = { totalUsd: 0, source: "native" };
+  expect(renderCost(ctx)).toBeNull();
+});
+
+test("renderCost: showCost=true + estimate → renders (explicit opt-in)", () => {
+  const ctx = makeAnthropicCtx();
+  ctx.config.display.showCost = true;
+  ctx.costData = { totalUsd: 0.38, source: "estimate" };
+  const out = renderCost(ctx);
+  expect(out).not.toBeNull();
+  expect(out).toContain("$0.380");
+  expect(out).toContain("(est)");
 });

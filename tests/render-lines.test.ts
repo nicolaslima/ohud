@@ -119,11 +119,20 @@ test("cost line shows native value", () => {
   expect(out).toContain("$0.42");
 });
 
-test("cost line null when toggle off", () => {
+test("cost line null when toggle off and only estimate available", () => {
+  // showCost=false (default) hides estimates; only native cost > 0 auto-shows.
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.costData = { totalUsd: 0.42, source: "estimate" };
+  expect(renderCost(ctx)).toBeNull();
+});
+
+test("cost line auto-shows on extra-usage (toggle off + native > 0)", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
   ctx.costData = { totalUsd: 0.42, source: "native" };
-  expect(renderCost(ctx)).toBeNull();
+  const out = renderCost(ctx);
+  expect(out).toContain("$0.42");
 });
 
 test("cost line null in ollama mode", () => {

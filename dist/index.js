@@ -997,10 +997,12 @@ function relativeTime(ms) {
 function renderCost(ctx) {
   if (ctx.mode !== "anthropic")
     return null;
-  if (!ctx.config.display.showCost)
-    return null;
   if (!ctx.costData)
     return null;
+  if (!ctx.config.display.showCost) {
+    if (ctx.costData.source !== "native" || ctx.costData.totalUsd <= 0)
+      return null;
+  }
   const c = ctx.config.colors;
   const suffix = ctx.costData.source === "estimate" ? color(c.label, " (est)") : "";
   return `${color(c.label, "Cost")} ${color(c.label, formatUsd(ctx.costData.totalUsd))}${suffix}`;

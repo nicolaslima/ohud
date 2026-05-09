@@ -221,14 +221,25 @@ Fallback: `display.externalUsagePath` aponta para um JSON snapshot, lido por `sr
 
 **File**: `src/render/lines/cost.ts:renderCost`
 **Modo**: `anthropic` apenas
-**Flag**: `showCost` (default off)
-**Retorna `null` quando**: modo Ollama, flag off, ou `costData` é `null`.
+**Flag**: `showCost` (default off — auto-display only on extra-usage)
+**Retorna `null` quando**: modo Ollama, `costData` é `null`, ou — com `showCost: false` — quando `costData.source !== "native"` ou `costData.totalUsd <= 0`.
+
+### Gating (auto vs opt-in)
+
+| `showCost` | `costData` | renderiza? |
+|---|---|---|
+| `true` (opt-in) | qualquer valor presente | sim (native ou estimate) |
+| `false` / default | `source: "native"` e `totalUsd > 0` | sim — sinal de **extra-usage** detectado |
+| `false` / default | `source: "estimate"` | não — estimates só com opt-in |
+| `false` / default | `totalUsd === 0` ou `null` | não |
+
+A intenção: usuários em planos pagos dentro do limite não devem ver `Cost $0.00` toda tick. Só mostramos automaticamente quando Claude Code reporta um `cost.total_cost_usd > 0` nativo — o que sinaliza cobrança real fora do plano (extra-usage). Estimates calculadas localmente a partir de tokens só aparecem se o usuário fizer opt-in explícito via `showCost: true` (e.g. preset "Full").
 
 ### O que renderiza
 
 ```
-Cost $0.42       ← cost.total_cost_usd presente (source: "native")
-Cost $0.38 (est) ← estimado de tokens (source: "estimate")
+Cost $0.42       ← cost.total_cost_usd presente e > 0 (source: "native")
+Cost $0.38 (est) ← estimado de tokens (source: "estimate", requer showCost: true)
 ```
 
 `(est)` aparece dim quando ohud tem que estimar — ou seja, quando `cost.total_cost_usd` está ausente do stdin e `src/cost.ts:estimateCost` calculou a partir de `current_usage.*`.
@@ -497,7 +508,7 @@ Cada linha passa por `truncateLine(line, maxWidth)` em `src/render/width.ts`. `m
 | 2 | context | any | on | ❌ | `context_window.used_percentage` |
 | 3 | apiTime | ollama | on | ❌ | `cost.total_api_duration_ms` |
 | 4 | usage | anthropic | on | ❌ | `rate_limits.*` |
-| 5 | cost | anthropic | off | ❌ | `cost.total_cost_usd` ou estimativa |
+| 5 | cost | anthropic | off (auto on extra-usage) | ❌ | `cost.total_cost_usd` ou estimativa |
 | 6 | promptCache | anthropic | off | ❌ | `transcript.lastAssistantResponseAt` |
 | 7 | tools | any | off | ❌ | `transcript.tools[]` |
 | 8 | agents | any | off | ❌ | `transcript.agents[]` |
