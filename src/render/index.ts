@@ -3,16 +3,27 @@ import { color } from "./colors.js";
 import type { RenderContext } from "../types.js";
 import type { WidgetCell, HushCell } from "./widget.js";
 import { visibleWidgets } from "./widgets/index.js";
-import { LAYOUTS } from "./layout/index.js";
+import { LAYOUTS, type LayoutName } from "./layout/index.js";
 import { detectTerminalWidth } from "./width.js";
+
+/** Runtime narrowing: a config file's `display.layout` is structurally `string`
+ *  at parse time (JSON has no enum), so the TS-level `"row" | "hush"` typing
+ *  isn't enough. This guard catches malformed values like `"tracks"` and lets
+ *  us fall back to RowLayout deterministically. */
+function isValidLayout(name: string): name is LayoutName {
+  return name === "row" || name === "hush";
+}
 
 export function render(ctx: RenderContext): string {
   const widgets = visibleWidgets(ctx.config);
 
-  // Read layout dynamically from config (added in Task C). Falls back to "row"
-  // for any config file that pre-dates Task C or omits display.layout.
-  const layoutName = ctx.config.display.layout ?? "row";
-  const layout = LAYOUTS[layoutName] ?? LAYOUTS.row;
+  // Read layout dynamically from config (added in Task C). Bad/unknown values
+  // resolve to "row" via runtime narrowing, NOT via the type system (a user
+  // with an out-of-date schema in their config.json must not crash the bundle).
+  const rawLayout = ctx.config.display.layout;
+  const layoutName: LayoutName =
+    typeof rawLayout === "string" && isValidLayout(rawLayout) ? rawLayout : "row";
+  const layout = LAYOUTS[layoutName];
   const termWidth = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
 
   // Render each widget to cells, choosing hush render path when appropriate.

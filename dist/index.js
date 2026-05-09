@@ -286,16 +286,6 @@ async function loadConfig(path) {
   return deepMerge(base, parsed);
 }
 
-// src/mode.ts
-function resolveMode(stdin, probe) {
-  const id = stdin.model?.id?.toLowerCase() ?? "";
-  if (id.startsWith("claude-"))
-    return "anthropic";
-  if (id.length > 0)
-    return "ollama";
-  return probe.daemonOk ? "ollama" : "anthropic";
-}
-
 // src/doctor.ts
 var CONSUMED_FLAGS = new Set([
   "showModel",
@@ -348,10 +338,8 @@ async function runDoctor(opts) {
   lines.push(`mode: ${probe.daemonOk && probe.cloudModels.length > 0 ? "ollama-capable" : "anthropic"}`);
   const activeLayout = cfg.display.layout ?? "row";
   lines.push(`Active layout: ${activeLayout}`);
-  const dummyStdin = {};
-  const resolvedMode = resolveMode(dummyStdin, probe);
-  const modelId = dummyStdin.model?.id ?? "(none)";
-  lines.push(`Mode resolution: model.id=${modelId} → ${resolvedMode}`);
+  lines.push(`Daemon probe: ${probe.daemonOk ? "ok" : "fail"}`);
+  lines.push(`Mode resolution rule: model.id starts with "claude-" → anthropic; ` + `otherwise → ollama; missing → daemon-probe fallback (currently ` + `${probe.daemonOk ? "ollama" : "anthropic"}).`);
   if (activeLayout === "hush") {
     const h = cfg.display.hush ?? {};
     lines.push(`Hush config: compactWhenIdle=${h.compactWhenIdle ?? true}, hyperlinks=${h.hyperlinks ?? true}, animate=${h.animate ?? true}`);
@@ -403,6 +391,16 @@ function readPackageJson() {
   } catch {
     return { version: "unknown" };
   }
+}
+
+// src/mode.ts
+function resolveMode(stdin, probe) {
+  const id = stdin.model?.id?.toLowerCase() ?? "";
+  if (id.startsWith("claude-"))
+    return "anthropic";
+  if (id.length > 0)
+    return "ollama";
+  return probe.daemonOk ? "ollama" : "anthropic";
 }
 
 // src/transcript.ts
@@ -1155,8 +1153,8 @@ var contextWidget = {
     if (typeof pct !== "number" || !Number.isFinite(pct))
       return null;
     const rounded = Math.round(pct);
-    const warn = ctx.config.display.warningThreshold;
-    const crit = ctx.config.display.criticalThreshold;
+    const warn = ctx.config.display.hush?.thresholds?.warning ?? ctx.config.display.warningThreshold;
+    const crit = ctx.config.display.hush?.thresholds?.danger ?? ctx.config.display.criticalThreshold;
     const attention = rounded >= crit ? "danger" : rounded >= warn ? "warning" : "muted";
     return {
       group: "metrics",
@@ -1312,8 +1310,8 @@ var usageWidget = {
     if (!ctx.usageData)
       return null;
     const { fiveHour, sevenDay } = ctx.usageData;
-    const warn = ctx.config.display.warningThreshold;
-    const crit = ctx.config.display.criticalThreshold;
+    const warn = ctx.config.display.hush?.thresholds?.warning ?? ctx.config.display.warningThreshold;
+    const crit = ctx.config.display.hush?.thresholds?.danger ?? ctx.config.display.criticalThreshold;
     const fiveHourPct = fiveHour ?? 0;
     const sevenDayPct = sevenDay ?? 0;
     if (fiveHourPct < 50 && sevenDayPct < 50)
@@ -2054,9 +2052,9 @@ function glyphMode(config) {
     return "unicode";
   return "ascii";
 }
-function renderCell(cell, now, mode, env) {
+function renderCell(cell, now, mode, env, toggles) {
   let text = cell.text;
-  if (cell.animate === "spinner") {
+  if (cell.animate === "spinner" && toggles.animate) {
     const glyph2 = spinnerFrame(now, mode);
     text = `${glyph2} ${text}`;
   }
@@ -2080,7 +2078,7 @@ function renderCell(cell, now, mode, env) {
       break;
   }
   if (cell.link) {
-    text = link(text, cell.link, true);
+    text = link(text, cell.link, toggles.hyperlinks);
   }
   return text;
 }
@@ -2091,12 +2089,16 @@ var hushLayout = {
     const now = Date.now();
     const mode = glyphMode(config);
     const env = process.env;
+    const toggles = {
+      hyperlinks: config.display.hush?.hyperlinks !== false,
+      animate: config.display.hush?.animate !== false
+    };
     const headerCells = hushCells.filter((c) => c.group === "header");
     const metricsCells = hushCells.filter((c) => c.group === "metrics");
     const activityCells = hushCells.filter((c) => c.group === "activity");
-    const line1Parts = [...headerCells, ...metricsCells].map((c) => renderCell(c, now, mode, env));
+    const line1Parts = [...headerCells, ...metricsCells].map((c) => renderCell(c, now, mode, env, toggles));
     const line1 = line1Parts.join(SEP);
-    const line2Parts = activityCells.map((c) => renderCell(c, now, mode, env));
+    const line2Parts = activityCells.map((c) => renderCell(c, now, mode, env, toggles));
     const line2 = line2Parts.join(SEP);
     const lines = [];
     if (line1)
@@ -2119,10 +2121,14 @@ var LAYOUTS = {
 };
 
 // src/render/index.ts
+function isValidLayout(name) {
+  return name === "row" || name === "hush";
+}
 function render(ctx) {
   const widgets = visibleWidgets(ctx.config);
-  const layoutName = ctx.config.display.layout ?? "row";
-  const layout = LAYOUTS[layoutName] ?? LAYOUTS.row;
+  const rawLayout = ctx.config.display.layout;
+  const layoutName = typeof rawLayout === "string" && isValidLayout(rawLayout) ? rawLayout : "row";
+  const layout = LAYOUTS[layoutName];
   const termWidth = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
   const cells = widgets.flatMap((w) => {
     if (layoutName === "hush" && w.renderHush) {

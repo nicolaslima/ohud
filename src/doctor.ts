@@ -5,8 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { probeOllama } from "./ollama-probe.js";
 import { loadConfig } from "./config.js";
-import { resolveMode } from "./mode.js";
-import type { HudConfig, StdinData } from "./types.js";
+import type { HudConfig } from "./types.js";
 
 // CONSUMED_FLAGS: flags actually read by render or orchestrator code.
 // Maintenance: regenerate by running:
@@ -53,15 +52,19 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
   lines.push(`cloud models: ${probe.cloudModels.map((m) => m.name).join(", ") || "(none)"}`);
   lines.push(`mode: ${(probe.daemonOk && probe.cloudModels.length > 0) ? "ollama-capable" : "anthropic"}`);
 
-  // Task C additions: active layout and mode resolution transparency
+  // Task C additions: active layout and mode resolution transparency.
   const activeLayout = cfg.display.layout ?? "row";
   lines.push(`Active layout: ${activeLayout}`);
 
-  // Show model.id-driven mode resolution using a representative empty stdin
-  const dummyStdin: StdinData = {};
-  const resolvedMode = resolveMode(dummyStdin, probe);
-  const modelId = dummyStdin.model?.id ?? "(none)";
-  lines.push(`Mode resolution: model.id=${modelId} → ${resolvedMode}`);
+  // Mode resolution is per-tick and depends on the current stdin.model.id, which
+  // /ohud doctor doesn't have access to (it runs without a piped session). Document
+  // the rule instead of fabricating a result, so users understand the resolver.
+  lines.push(`Daemon probe: ${probe.daemonOk ? "ok" : "fail"}`);
+  lines.push(
+    `Mode resolution rule: model.id starts with "claude-" → anthropic; ` +
+    `otherwise → ollama; missing → daemon-probe fallback (currently ` +
+    `${probe.daemonOk ? "ollama" : "anthropic"}).`,
+  );
 
   // Hush config summary when active layout is hush
   if (activeLayout === "hush") {

@@ -519,3 +519,64 @@ describe("Multi-line agent output is split into separate physical lines", () => 
     expect(agentLines.length).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task C review C1: runtime narrowing — unknown layout names fall back to row
+// ---------------------------------------------------------------------------
+
+describe("Layout fallback for unknown values", () => {
+  test('config.display.layout="tracks" (unknown) falls back to RowLayout', () => {
+    const ctx = makeCtx({
+      usageData: { fiveHour: 25, sevenDay: 41, fiveHourResetAt: null, sevenDayResetAt: null },
+    });
+    ctx.config.maxWidth = 200;
+    // Force-cast to bypass the TS-level "row" | "hush" union — simulates a
+    // user editing config.json by hand with an out-of-date layout name.
+    (ctx.config.display as unknown as { layout: string }).layout = "tracks";
+
+    const out = render(ctx);
+    const lines = out.split("\n");
+
+    // Same shape as Scenario 1: line 1 = project, line 2 = context+usage merged.
+    const expectedProject = renderProject(ctx);
+    expect(lines[0]).toBe(expectedProject);
+    // Line 2 looks like RowLayout output (Context label present)
+    expect(lines[1]).toContain("Context");
+    expect(lines[1]).toContain("45%");
+  });
+
+  test("config.display.layout=undefined falls back to RowLayout", () => {
+    const ctx = makeCtx({
+      usageData: { fiveHour: 25, sevenDay: 41, fiveHourResetAt: null, sevenDayResetAt: null },
+    });
+    ctx.config.maxWidth = 200;
+    delete (ctx.config.display as unknown as { layout?: string }).layout;
+
+    const out = render(ctx);
+    const expectedProject = renderProject(ctx);
+    expect(out.split("\n")[0]).toBe(expectedProject);
+  });
+
+  test('config.display.layout=null (corrupt JSON) falls back to RowLayout', () => {
+    const ctx = makeCtx({
+      usageData: { fiveHour: 25, sevenDay: 41, fiveHourResetAt: null, sevenDayResetAt: null },
+    });
+    ctx.config.maxWidth = 200;
+    (ctx.config.display as unknown as { layout: unknown }).layout = null;
+
+    // Should NOT throw; should render normal Row output.
+    const out = render(ctx);
+    expect(out.split("\n")[0]).toBe(renderProject(ctx));
+  });
+
+  test('config.display.layout=42 (number, corrupt) falls back to RowLayout', () => {
+    const ctx = makeCtx({
+      usageData: { fiveHour: 25, sevenDay: 41, fiveHourResetAt: null, sevenDayResetAt: null },
+    });
+    ctx.config.maxWidth = 200;
+    (ctx.config.display as unknown as { layout: unknown }).layout = 42;
+
+    const out = render(ctx);
+    expect(out.split("\n")[0]).toBe(renderProject(ctx));
+  });
+});

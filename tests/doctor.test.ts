@@ -33,9 +33,24 @@ test("doctor shows 'Active layout: hush' when configured", async () => {
   }
 });
 
-test("doctor shows Mode resolution line", async () => {
+test("doctor shows Daemon probe line", async () => {
   const out = await runDoctor({ host: "http://localhost:11434", configPath: "/tmp/no-config.json" });
-  expect(out).toMatch(/Mode resolution: model\.id=.+→/);
+  expect(out).toMatch(/Daemon probe: (ok|fail)/);
+});
+
+test("doctor shows Mode resolution rule (not a per-stdin claim)", async () => {
+  const out = await runDoctor({ host: "http://localhost:11434", configPath: "/tmp/no-config.json" });
+  // Rule-based output explains the resolver instead of claiming a specific result.
+  expect(out).toMatch(/Mode resolution rule:/);
+  expect(out).toContain('model.id starts with "claude-" → anthropic');
+  expect(out).toContain("missing → daemon-probe fallback");
+});
+
+test("doctor does NOT use the old dummy-stdin Mode resolution format", async () => {
+  // Old broken format: 'Mode resolution: model.id=(none) → ...' (always reported
+  // daemon-probe path regardless of actual session). Should be gone.
+  const out = await runDoctor({ host: "http://localhost:11434", configPath: "/tmp/no-config.json" });
+  expect(out).not.toMatch(/Mode resolution: model\.id=\(none\)/);
 });
 
 test("doctor shows Hush config summary when layout is hush", async () => {

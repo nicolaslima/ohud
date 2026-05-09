@@ -22,8 +22,11 @@ export const contextWidget: Widget = {
     const pct = ctx.stdin.context_window?.used_percentage;
     if (typeof pct !== "number" || !Number.isFinite(pct)) return null;
     const rounded = Math.round(pct);
-    const warn = ctx.config.display.warningThreshold;   // default 60
-    const crit = ctx.config.display.criticalThreshold;  // default 75
+
+    // Hush-specific thresholds override the global warning/critical thresholds.
+    // Falls through to display.warningThreshold/criticalThreshold (defaults 60/75).
+    const warn = ctx.config.display.hush?.thresholds?.warning ?? ctx.config.display.warningThreshold;
+    const crit = ctx.config.display.hush?.thresholds?.danger  ?? ctx.config.display.criticalThreshold;
 
     const attention =
       rounded >= crit ? "danger" :

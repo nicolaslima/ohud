@@ -77,17 +77,26 @@ function glyphMode(config: HudConfig): "unicode" | "ascii" {
   return "ascii";
 }
 
+/** Toggles read once per pack() call, sourced from `config.display.hush.*`. */
+interface HushToggles {
+  /** Emit OSC 8 hyperlinks (default true). */
+  hyperlinks: boolean;
+  /** Animate spinner glyph for running activity (default true). */
+  animate: boolean;
+}
+
 /** Render a single HushCell to a styled string. */
 function renderCell(
   cell: HushCell,
   now: number,
   mode: "unicode" | "ascii",
   env: NodeJS.ProcessEnv,
+  toggles: HushToggles,
 ): string {
   let text = cell.text;
 
-  // Step 2: prepend spinner glyph for animated cells
-  if (cell.animate === "spinner") {
+  // Step 2: prepend spinner glyph for animated cells (gated by hush.animate)
+  if (cell.animate === "spinner" && toggles.animate) {
     const glyph = spinnerFrame(now, mode);
     text = `${glyph} ${text}`;
   }
@@ -114,9 +123,10 @@ function renderCell(
       break;
   }
 
-  // Step 4: wrap in OSC 8 hyperlink if present (links are metadata, not color)
+  // Step 4: wrap in OSC 8 hyperlink if present (links are metadata, not color).
+  // Gated by hush.hyperlinks for terminals that mishandle OSC 8.
   if (cell.link) {
-    text = osc8(text, cell.link, true);
+    text = osc8(text, cell.link, toggles.hyperlinks);
   }
 
   return text;
@@ -137,6 +147,12 @@ export const hushLayout: Layout = {
     const mode = glyphMode(config);
     const env = process.env;
 
+    // Read user toggles from config; both default to true per plan section 5.
+    const toggles: HushToggles = {
+      hyperlinks: config.display.hush?.hyperlinks !== false,
+      animate:    config.display.hush?.animate    !== false,
+    };
+
     // Partition into groups
     const headerCells   = hushCells.filter((c) => c.group === "header");
     const metricsCells  = hushCells.filter((c) => c.group === "metrics");
@@ -144,12 +160,12 @@ export const hushLayout: Layout = {
 
     // Build line 1: header + metrics joined with SEP
     const line1Parts = [...headerCells, ...metricsCells].map((c) =>
-      renderCell(c, now, mode, env),
+      renderCell(c, now, mode, env, toggles),
     );
     const line1 = line1Parts.join(SEP);
 
     // Build line 2: activity cells
-    const line2Parts = activityCells.map((c) => renderCell(c, now, mode, env));
+    const line2Parts = activityCells.map((c) => renderCell(c, now, mode, env, toggles));
     const line2 = line2Parts.join(SEP);
 
     const lines: string[] = [];

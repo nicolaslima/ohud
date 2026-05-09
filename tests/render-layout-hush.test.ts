@@ -649,6 +649,143 @@ describe("Branch OSC 8 link", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Task C review: hush.hyperlinks / hush.animate / hush.thresholds toggles
+// ---------------------------------------------------------------------------
+
+describe("hush.hyperlinks toggle", () => {
+  test("display.hush.hyperlinks=false strips OSC 8 escape sequences", () => {
+    const ctx = makeCtx();
+    if (ctx.gitStatus) ctx.gitStatus.remoteUrl = "git@github.com:anthropic/ohud.git";
+    ctx.config.display.hush = { hyperlinks: false };
+    const cells = collectCells([projectWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    // OSC 8 sequence: \x1b]8;;...
+    expect(lines.join("\n")).not.toContain("\x1b]8;;");
+  });
+
+  test("display.hush.hyperlinks=true (default) emits OSC 8", () => {
+    const ctx = makeCtx();
+    if (ctx.gitStatus) ctx.gitStatus.remoteUrl = "git@github.com:anthropic/ohud.git";
+    // Don't set hyperlinks → default true via DEFAULT_CONFIG
+    const cells = collectCells([projectWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    expect(lines.join("\n")).toContain("\x1b]8;;");
+  });
+});
+
+describe("hush.animate toggle", () => {
+  test("display.hush.animate=false omits spinner glyph but keeps cell content", () => {
+    const now = new Date("2024-01-01T00:00:00Z");
+    const ctx = makeCtx({
+      transcript: {
+        tools: [{ id: "1", name: "Edit", status: "running", startTime: now }],
+        agents: [],
+        todos: [],
+      },
+    });
+    ctx.config.display.showTools = true;
+    ctx.config.display.hush = { animate: false };
+    const cells = collectCells([toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const plain = stripAnsi(lines.join("\n"));
+    // No spinner glyphs (◐ ◓ ◑ ◒ for unicode)
+    expect(plain).not.toMatch(/[◐◓◑◒]/);
+    // But the running tool name still shows
+    expect(plain).toContain("Edit");
+  });
+
+  test("display.hush.animate=true (default) renders spinner glyph for running tools", () => {
+    const now = new Date("2024-01-01T00:00:00Z");
+    const ctx = makeCtx({
+      transcript: {
+        tools: [{ id: "1", name: "Edit", status: "running", startTime: now }],
+        agents: [],
+        todos: [],
+      },
+    });
+    ctx.config.display.showTools = true;
+    // Default animate=true via DEFAULT_CONFIG
+    const cells = collectCells([toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const plain = stripAnsi(lines.join("\n"));
+    expect(plain).toMatch(/[◐◓◑◒]/);
+  });
+
+  test("display.hush.animate=false: cyan baseColor still applied for running tool", () => {
+    const now = new Date("2024-01-01T00:00:00Z");
+    const ctx = makeCtx({
+      transcript: {
+        tools: [{ id: "1", name: "Edit", status: "running", startTime: now }],
+        agents: [],
+        todos: [],
+      },
+    });
+    ctx.config.display.showTools = true;
+    ctx.config.display.hush = { animate: false };
+    const cells = collectCells([toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    // Cyan SGR is \x1b[36m
+    expect(lines.join("\n")).toContain("\x1b[36m");
+  });
+});
+
+describe("hush.thresholds override", () => {
+  test("hush.thresholds.warning=70 → context at 65% is muted (not warning)", () => {
+    const ctx = makeCtx({
+      stdin: {
+        model: { id: "claude-opus-4-7" },
+        workspace: { current_dir: "/tmp", project_dir: "/tmp" },
+        context_window: { context_window_size: 200000, used_percentage: 65 },
+      },
+    });
+    ctx.config.display.hush = { thresholds: { warning: 70, danger: 85 } };
+    const cell = contextWidget.renderHush!(ctx) as HushCell;
+    expect(cell.attention).toBe("muted");
+  });
+
+  test("hush.thresholds.danger=90 → context at 80% renders as warning (not danger)", () => {
+    const ctx = makeCtx({
+      stdin: {
+        model: { id: "claude-opus-4-7" },
+        workspace: { current_dir: "/tmp", project_dir: "/tmp" },
+        context_window: { context_window_size: 200000, used_percentage: 80 },
+      },
+    });
+    ctx.config.display.hush = { thresholds: { warning: 70, danger: 90 } };
+    const cell = contextWidget.renderHush!(ctx) as HushCell;
+    expect(cell.attention).toBe("warning");
+  });
+
+  test("default thresholds: context at 65% → warning (60..74)", () => {
+    const ctx = makeCtx({
+      stdin: {
+        model: { id: "claude-opus-4-7" },
+        workspace: { current_dir: "/tmp", project_dir: "/tmp" },
+        context_window: { context_window_size: 200000, used_percentage: 65 },
+      },
+    });
+    // No hush.thresholds override → falls through to display.warningThreshold=60
+    const cell = contextWidget.renderHush!(ctx) as HushCell;
+    expect(cell.attention).toBe("warning");
+  });
+
+  test("hush.thresholds.warning falls through to display.warningThreshold when undefined", () => {
+    const ctx = makeCtx({
+      stdin: {
+        model: { id: "claude-opus-4-7" },
+        workspace: { current_dir: "/tmp", project_dir: "/tmp" },
+        context_window: { context_window_size: 200000, used_percentage: 50 },
+      },
+    });
+    ctx.config.display.warningThreshold = 40; // global override
+    ctx.config.display.hush = {}; // no thresholds key
+    const cell = contextWidget.renderHush!(ctx) as HushCell;
+    // 50% >= 40 (warning) and < 75 (danger) → warning
+    expect(cell.attention).toBe("warning");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Utility: strip ANSI SGR codes (not OSC 8)
 // ---------------------------------------------------------------------------
 function stripAnsi(s: string): string {

@@ -23,8 +23,9 @@ export const usageWidget: Widget = {
     if (!ctx.usageData) return null;
 
     const { fiveHour, sevenDay } = ctx.usageData;
-    const warn = ctx.config.display.warningThreshold;  // default 60
-    const crit = ctx.config.display.criticalThreshold; // default 75
+    // Hush-specific thresholds override the global warning/critical thresholds.
+    const warn = ctx.config.display.hush?.thresholds?.warning ?? ctx.config.display.warningThreshold;
+    const crit = ctx.config.display.hush?.thresholds?.danger  ?? ctx.config.display.criticalThreshold;
 
     // Suppressed when both 5h and 7d < 50%
     const fiveHourPct = fiveHour ?? 0;
