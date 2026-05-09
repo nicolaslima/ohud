@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readStdin } from "./stdin.js";
 import { probeOllama } from "./ollama-probe.js";
+import { runDoctor } from "./doctor.js";
 import { resolveMode } from "./mode.js";
 import { parseTranscript } from "./transcript.js";
 import { getGitStatus } from "./git.js";
@@ -19,6 +20,12 @@ const CONFIG_PATH = join(homedir(), ".claude/plugins/ohud/config.json");
 export async function main(): Promise<void> {
   const T0 = process.hrtime.bigint();
   const profile = process.env.OHUD_PROFILE === "1";
+  if (process.argv.includes("--doctor")) {
+    const cfg = await loadConfig(CONFIG_PATH);
+    const out = await runDoctor({ host: cfg.ollama.host, configPath: CONFIG_PATH });
+    console.log(out);
+    return;
+  }
   try {
     const stdin = await readStdin();
     if (!stdin) {
