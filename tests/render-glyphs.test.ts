@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
-import { glyph } from "../src/render/glyphs.js";
+import { glyph, iconForMode } from "../src/render/glyphs.js";
+import type { RenderMode } from "../src/types.js";
 
 test("glyph returns unicode in unicode mode", () => {
   expect(glyph("bolt", "unicode")).toBe("⚡");
@@ -52,4 +53,41 @@ test('nerd mode falls through to unicode for uncovered keys', () => {
   expect(glyph("sep", "nerd")).toBe("│");
   expect(glyph("barFull", "nerd")).toBe("█");
   expect(glyph("up", "nerd")).toBe("↑");
+});
+
+// ---------------------------------------------------------------------------
+// iconForMode tests
+// ---------------------------------------------------------------------------
+
+test("iconForMode: auto + anthropic mode → ✱ in unicode tier", () => {
+  expect(iconForMode("anthropic", "unicode")).toBe("✱");
+});
+
+test("iconForMode: auto + ollama mode → 🦙 in unicode tier", () => {
+  expect(iconForMode("ollama", "unicode")).toBe("🦙");
+});
+
+test("iconForMode: auto + unknown mode → empty string", () => {
+  expect(iconForMode("unknown" as RenderMode, "unicode")).toBe("");
+});
+
+test("iconForMode: override 'anthropic' + ollama mode → ✱ (override wins)", () => {
+  expect(iconForMode("ollama", "unicode", "anthropic")).toBe("✱");
+});
+
+test("iconForMode: override 'none' → empty regardless of mode", () => {
+  expect(iconForMode("anthropic", "unicode", "none")).toBe("");
+  expect(iconForMode("ollama", "unicode", "none")).toBe("");
+});
+
+test("iconForMode: ascii tier → returns ASCII variants", () => {
+  expect(iconForMode("anthropic", "ascii")).toBe("*");
+  expect(iconForMode("ollama", "ascii")).toBe("L");
+});
+
+test("iconForMode: nerd tier → nerd glyph for anthropic, falls through to unicode for ollama (no nerd glyph for llama)", () => {
+  // Anthropic has a nerd glyph (nf-fa-asterisk)
+  expect(iconForMode("anthropic", "nerd")).toBe("");   // U+F069 nf-fa-asterisk
+  // Ollama has no nerd glyph → falls back to 🦙 (unicode)
+  expect(iconForMode("ollama", "nerd")).toBe("🦙");
 });

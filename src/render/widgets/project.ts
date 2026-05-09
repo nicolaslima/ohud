@@ -60,9 +60,9 @@ export const projectWidget: Widget = {
     // --- Sub-cell 3: model id (blue, OSC 8 → Anthropic docs anchor) ---
     if (ctx.config.display.showModel) {
       const rawId = ctx.stdin.model?.id ?? "";
-      // Condense using the raw id (e.g. "claude-opus-4-7" → "opus-4.7")
+      // Format using the raw id (e.g. "claude-opus-4-7" → "Opus 4.7 (1M)")
       // Prefer id over display_name because display_name may have spaces in the version
-      const modelLabel = condenseModelId(rawId);
+      const modelLabel = formatModelLabel(rawId);
       if (modelLabel) {
         // Build anchor: "claude-opus-4-7" → "claude-opus-47"
         const anchor = rawId.replace(/\./g, "");
@@ -153,6 +153,8 @@ function effortBlock(ctx: RenderContext): string {
 }
 
 /** Condense a model display_name or id to a compact label.
+ *  Kept for backward compatibility — consumed by agents.ts.
+ *  New code should use formatModelLabel() instead.
  *  "claude-opus-4-7-1m" → "opus-4.7"  (strips context-window suffix first)
  *  "claude-opus-4-7" → "opus-4.7"
  *  "Claude Opus 4.7" → "opus-4.7" (lowercase, strip "claude ")
@@ -167,6 +169,111 @@ export function condenseModelId(nameOrId: string): string {
   // Replace hyphens-between-digits with dots: "opus-4-7" → "opus-4.7"
   s = s.replace(/(\d)-(\d)/g, "$1.$2").toLowerCase();
   return s;
+}
+
+// Default context-window sizes by model family (when no explicit suffix found).
+// Keys are matched against the lowercased first word segment of the name after
+// stripping the "claude-" prefix.
+const DEFAULT_CONTEXT: Record<string, string> = {
+  opus:   "1M",
+  sonnet: "200K",
+  haiku:  "200K",
+};
+
+/**
+ * Format a model id into a friendly label with explicit context-window suffix.
+ *
+ *   "claude-opus-4-7-1m"       → "Opus 4.7 (1M)"
+ *   "claude-opus-4-7"          → "Opus 4.7 (1M)"   ← default lookup
+ *   "claude-sonnet-4-6"        → "Sonnet 4.6 (200K)"
+ *   "claude-haiku-4-5-20251001"→ "Haiku 4.5 (200K)" ← date stamp stripped
+ *   "kimi-k2-6-262k"           → "Kimi K2.6 (262K)"
+ *   "gpt-oss-20b-128k"         → "Gpt-Oss 20B (128K)"
+ *   "something-weird"          → "something-weird"  ← passthrough
+ */
+export function formatModelLabel(nameOrId: string): string {
+  let s = nameOrId.trim();
+  if (!s) return s;
+
+  // Step 1: Strip leading "claude-" prefix (case-insensitive).
+  if (s.toLowerCase().startsWith("claude-")) s = s.slice(7);
+
+  // Step 2: Strip trailing date-stamps like -20251001 (8 consecutive digits).
+  s = s.replace(/-\d{8}$/, "");
+
+  // Step 3: Extract explicit context-size suffix.
+  // Last hyphen-segment matching digits + unit letter (k/m, case-insensitive).
+  let contextLabel: string | null = null;
+  const ctxMatch = /^(.*)-(\d+[kKmM])$/.exec(s);
+  if (ctxMatch) {
+    s = ctxMatch[1]!;
+    const raw = ctxMatch[2]!;
+    // Uppercase the unit letter (k→K, m→M); digit part stays as-is.
+    contextLabel = raw.slice(0, -1) + raw.slice(-1).toUpperCase();
+  }
+
+  // Step 4: Build the friendly name.
+  //
+  // Segments are split on "-", then grouped into:
+  //   - word prefix: consecutive pure-alpha segments before any digit-bearing one
+  //   - version suffix: remaining segments (may mix alpha+digit and digit tokens)
+  //
+  // Word prefix: each segment is capitalised; they are hyphen-joined together.
+  //   "gpt-oss" → "Gpt-Oss"   "kimi" → "Kimi"   "opus" → "Opus"
+  //
+  // Version suffix segments are emitted as space-joined "version tokens":
+  //   - alpha+digit (starts letter): capitalise first letter; pure-digit segments
+  //     that immediately follow are dot-appended ("k2" + "6" → "K2.6")
+  //   - digit+alpha (starts digit, ends letter, e.g. "20b"): uppercase the letter
+  //   - pure digit ("4", "7"): dot-append to the previous token (so "4-7" → "4.7")
+  const segments = s.split("-");
+
+  // Find the split point: first segment that contains any digit.
+  let splitIdx = segments.findIndex((seg) => /\d/.test(seg));
+  if (splitIdx === -1) splitIdx = segments.length; // all-alpha
+
+  const wordSegs    = segments.slice(0, splitIdx);
+  const versionSegs = segments.slice(splitIdx);
+
+  // Word prefix: capitalise each, hyphen-join.
+  const wordPrefix = wordSegs
+    .map((seg) => seg.charAt(0).toUpperCase() + seg.slice(1))
+    .join("-");
+
+  // Version suffix: build dot-separated version tokens.
+  const versionTokens: string[] = [];
+  for (const seg of versionSegs) {
+    if (/^\d+$/.test(seg)) {
+      // Pure digit: dot-append to previous token, or start new token if none.
+      if (versionTokens.length > 0) {
+        versionTokens[versionTokens.length - 1] += "." + seg;
+      } else {
+        versionTokens.push(seg);
+      }
+    } else if (/^[a-zA-Z]/.test(seg)) {
+      // Starts with letter and contains digit ("k2"): capitalise first letter.
+      // Subsequent pure-digit segments will dot-append to this token.
+      versionTokens.push(seg.charAt(0).toUpperCase() + seg.slice(1));
+    } else {
+      // Digit-leading with trailing alpha suffix ("20b"): uppercase the letter.
+      const unitMatch = /^(\d+)([a-zA-Z]+)$/.exec(seg);
+      versionTokens.push(unitMatch ? unitMatch[1]! + unitMatch[2]!.toUpperCase() : seg);
+    }
+  }
+  const versionSuffix = versionTokens.join(" ");
+
+  const friendlyName = [wordPrefix, versionSuffix].filter(Boolean).join(" ");
+
+  // Step 5: If no explicit context suffix, look up by model family (first word segment).
+  if (contextLabel === null) {
+    const firstWord = (wordSegs[0] ?? segments[0] ?? "").toLowerCase();
+    contextLabel = DEFAULT_CONTEXT[firstWord] ?? null;
+  }
+
+  // Step 6: Compose final label.
+  if (contextLabel) return `${friendlyName} (${contextLabel})`;
+  // Passthrough: no family match and no explicit suffix — return original.
+  return nameOrId.trim();
 }
 
 /** Translate a git remote URL into a browseable HTTP(S) URL.

@@ -122,13 +122,13 @@ describe("Idle state", () => {
     expect(plain).toContain("main");
   });
 
-  test("line 1 contains model label (condensed)", () => {
+  test("line 1 contains model label (formatted)", () => {
     const ctx = makeCtx();
     const cells = collectCells([projectWidget, contextWidget], ctx);
     const [line1] = hushLayout.pack(cells, 200, ctx.config);
     const plain = stripAnsi(line1!);
-    // "claude-opus-4-7" → "opus-4.7"
-    expect(plain).toContain("opus-4.7");
+    // "claude-opus-4-7" → "Opus 4.7 (1M)"
+    expect(plain).toContain("Opus 4.7 (1M)");
   });
 
   test("line 1 contains context percentage", () => {
@@ -302,7 +302,7 @@ describe("Conditional bracket suppression", () => {
     expect(plain).not.toMatch(/   /);
     // Verify content present
     expect(plain).toContain("ohud");
-    expect(plain).toContain("opus-4.7");
+    expect(plain).toContain("Opus 4.7 (1M)");
   });
 
   test("when context is null, header cells still render correctly", () => {
@@ -454,7 +454,7 @@ describe("OSC 8 hyperlinks", () => {
   test("model cell has anthropic docs link", () => {
     const ctx = makeCtx();
     const cells = projectWidget.renderHush!(ctx) as HushCell[];
-    const modelCell = cells.find((c) => c.text.includes("opus"));
+    const modelCell = cells.find((c) => c.text.includes("Opus"));
     expect(modelCell).toBeDefined();
     expect(modelCell!.link).toBeDefined();
     expect(modelCell!.link!).toContain("docs.anthropic.com");

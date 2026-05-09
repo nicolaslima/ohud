@@ -351,6 +351,40 @@ function glyph(key, mode) {
     return ASCII[key];
   return UNICODE[key];
 }
+var ICON_UNICODE = {
+  anthropic: "✱",
+  ollama: "\uD83E\uDD99"
+};
+var ICON_NERD = {
+  anthropic: ""
+};
+var ICON_ASCII = {
+  anthropic: "*",
+  ollama: "L"
+};
+function iconForMode(mode, glyphMode, override = "auto") {
+  let variant;
+  if (override === "none")
+    return "";
+  if (override === "auto") {
+    if (mode === "anthropic")
+      variant = "anthropic";
+    else if (mode === "ollama")
+      variant = "ollama";
+    else
+      variant = null;
+  } else {
+    variant = override;
+  }
+  if (variant === null)
+    return "";
+  const tier = glyphMode === "auto" ? autoMode() : glyphMode;
+  if (tier === "ascii")
+    return ICON_ASCII[variant];
+  if (tier === "nerd")
+    return ICON_NERD[variant] ?? ICON_UNICODE[variant];
+  return ICON_UNICODE[variant];
+}
 
 // src/render/spinner.ts
 var UNICODE_FRAMES = ["◜", "◝", "◞", "◟"];
@@ -358,6 +392,354 @@ var ASCII_FRAMES = ["|", "/", "-", "\\"];
 function spinnerFrame(now, mode) {
   const idx = Math.floor(now / 1000) % 4;
   return mode === "ascii" ? ASCII_FRAMES[idx] : UNICODE_FRAMES[idx];
+}
+
+// src/render/colors.ts
+var RESET = "\x1B[0m";
+var NAMED = {
+  dim: "\x1B[2m",
+  red: "\x1B[31m",
+  green: "\x1B[32m",
+  yellow: "\x1B[33m",
+  magenta: "\x1B[35m",
+  cyan: "\x1B[36m",
+  brightBlue: "\x1B[94m",
+  brightMagenta: "\x1B[95m"
+};
+function isColorDisabled(env) {
+  const e = env ?? process.env;
+  if (e.NO_COLOR !== undefined && e.NO_COLOR !== "")
+    return true;
+  if (e.TERM === "dumb")
+    return true;
+  return false;
+}
+function color(spec, text) {
+  if (isColorDisabled())
+    return text;
+  if (NAMED[spec])
+    return `${NAMED[spec]}${text}${RESET}`;
+  if (/^\d+$/.test(spec)) {
+    const n = Number.parseInt(spec, 10);
+    if (n >= 0 && n <= 255)
+      return `\x1B[38;5;${n}m${text}${RESET}`;
+  }
+  const m = /^#([0-9a-f]{6})$/i.exec(spec);
+  if (m) {
+    const hex = m[1];
+    const r = Number.parseInt(hex.slice(0, 2), 16);
+    const g = Number.parseInt(hex.slice(2, 4), 16);
+    const b = Number.parseInt(hex.slice(4, 6), 16);
+    return `\x1B[38;2;${r};${g};${b}m${text}${RESET}`;
+  }
+  return text;
+}
+
+// src/render/path.ts
+function basename(p) {
+  const parts = p.split("/").filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : "";
+}
+
+// src/render/width.ts
+var WIDTH_2_GLYPHS = new Set([
+  "⚡",
+  "⏱",
+  "◐",
+  "◜",
+  "◝",
+  "◞",
+  "◟",
+  "✓",
+  "▸",
+  "▹"
+]);
+function wcwidth(s) {
+  let w = 0;
+  for (const ch of s) {
+    if (WIDTH_2_GLYPHS.has(ch)) {
+      w += 2;
+      continue;
+    }
+    const cp = ch.codePointAt(0) ?? 0;
+    if (cp >= 127744 && cp <= 129791) {
+      w += 2;
+      continue;
+    }
+    if (cp >= 65072 && cp <= 65103) {
+      w += 2;
+      continue;
+    }
+    if (cp >= 11904 && cp <= 12350) {
+      w += 2;
+      continue;
+    }
+    if (cp >= 12353 && cp <= 13311) {
+      w += 2;
+      continue;
+    }
+    if (cp >= 13312 && cp <= 19903) {
+      w += 2;
+      continue;
+    }
+    if (cp >= 19968 && cp <= 40959) {
+      w += 2;
+      continue;
+    }
+    if (cp >= 44032 && cp <= 55203) {
+      w += 2;
+      continue;
+    }
+    w += 1;
+  }
+  return w;
+}
+var ANSI_RE = /\x1b\[[0-9;]*m|\x1b\]8;;[^\x07]*\x07/g;
+var ANSI_AT_START_RE = /^(?:\x1b\[[0-9;]*m|\x1b\]8;;[^\x07]*\x07)/;
+function visibleWidth(s) {
+  return wcwidth(s.replace(ANSI_RE, ""));
+}
+function truncateLine(line, max) {
+  if (visibleWidth(line) <= max)
+    return line;
+  let out = "";
+  let visible = 0;
+  let i = 0;
+  while (i < line.length && visible < max - 1) {
+    const slice = line.slice(i);
+    const match = ANSI_AT_START_RE.exec(slice);
+    if (match) {
+      out += match[0];
+      i += match[0].length;
+      continue;
+    }
+    const ch = line.slice(i, i + 1);
+    const w = wcwidth(ch);
+    if (visible + w > max - 1)
+      break;
+    out += ch;
+    visible += w;
+    i += 1;
+  }
+  return out + "…\x1B[0m";
+}
+function detectTerminalWidth(env, fallback) {
+  const cols = env.COLUMNS ? Number.parseInt(env.COLUMNS, 10) : NaN;
+  if (Number.isFinite(cols) && cols > 0)
+    return cols;
+  if (process.stdout.columns && process.stdout.columns > 0)
+    return process.stdout.columns;
+  return fallback ?? 120;
+}
+
+// src/render/widgets/_util.ts
+function maxLineWidth(s) {
+  return Math.max(0, ...s.split(`
+`).map(visibleWidth));
+}
+
+// src/render/widgets/project.ts
+var projectWidget = {
+  id: "project",
+  group: "header",
+  priority: 100,
+  minWidth: 20,
+  render(ctx) {
+    const body = renderProject(ctx);
+    if (body == null)
+      return null;
+    return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    const cells = [];
+    const projectDir = ctx.stdin.workspace?.project_dir?.trim() ?? "";
+    let projectName;
+    if (projectDir) {
+      projectName = basename(projectDir) || projectDir;
+    } else {
+      const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd ?? "";
+      const parts = dir.split("/").filter(Boolean);
+      projectName = parts.slice(-ctx.config.pathLevels).join("/") || "ohud";
+    }
+    cells.push({
+      group: "header",
+      text: projectName,
+      attention: "normal",
+      baseColor: "cyan",
+      link: projectDir ? `file://${projectDir}` : undefined
+    });
+    if (ctx.config.gitStatus.enabled && ctx.gitStatus) {
+      const dirty = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty;
+      const dirtyMark = dirty ? ctx.config.display.glyphs === "ascii" ? " *" : " ●" : "";
+      const branchText = ctx.gitStatus.branch + dirtyMark;
+      const attention = dirty ? "warning" : "normal";
+      const branchLink = remoteUrlToHttp(ctx.gitStatus.remoteUrl);
+      cells.push({
+        group: "header",
+        text: branchText,
+        attention,
+        baseColor: dirty ? undefined : "green",
+        link: branchLink
+      });
+    }
+    if (ctx.config.display.showModel) {
+      const rawId = ctx.stdin.model?.id ?? "";
+      const modelLabel = formatModelLabel(rawId);
+      if (modelLabel) {
+        const anchor = rawId.replace(/\./g, "");
+        const modelUrl = anchor ? `https://docs.anthropic.com/en/docs/about-claude/models#${anchor}` : undefined;
+        cells.push({
+          group: "header",
+          text: modelLabel,
+          attention: "normal",
+          baseColor: "blue",
+          link: modelUrl
+        });
+      }
+    }
+    return cells;
+  }
+};
+function renderProject(ctx) {
+  const c = ctx.config;
+  const modelLabel = modelBadge(ctx);
+  const projectLabel = projectPath(ctx);
+  const gitLabel = gitBlock(ctx);
+  const effortLabel = effortBlock(ctx);
+  const parts = [];
+  if (c.display.showModel && modelLabel)
+    parts.push(color(c.colors.model, `[${modelLabel}]`));
+  if (projectLabel)
+    parts.push(color(c.colors.project, projectLabel));
+  if (gitLabel)
+    parts.push(gitLabel);
+  if (effortLabel)
+    parts.push(effortLabel);
+  return parts.join(color(c.colors.label, ` ${glyph("sep", c.display.glyphs)} `));
+}
+function modelBadge(ctx) {
+  const name = ctx.stdin.model?.display_name ?? ctx.stdin.model?.id ?? "model";
+  if (ctx.mode !== "ollama")
+    return name;
+  const cloudInfo = ctx.cloudModels.find((m) => m.name === ctx.stdin.model?.id || m.model === ctx.stdin.model?.id);
+  const param = cloudInfo?.details?.parameter_size;
+  return param ? `${name} ${glyph("bolt", ctx.config.display.glyphs)} ${param}` : name;
+}
+function projectPath(ctx) {
+  const projectDir = ctx.stdin.workspace?.project_dir?.trim() ?? "";
+  if (projectDir) {
+    const base = basename(projectDir);
+    if (base)
+      return base;
+  }
+  const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd ?? "";
+  if (!dir)
+    return "";
+  const parts = dir.split("/").filter(Boolean);
+  const n = ctx.config.pathLevels;
+  return parts.slice(-n).join("/");
+}
+function gitBlock(ctx) {
+  if (!ctx.config.gitStatus.enabled || !ctx.gitStatus)
+    return "";
+  const c = ctx.config.colors;
+  const wrapper = (s) => color(c.git, s);
+  const dirtyMark = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty ? "*" : "";
+  const branch = color(c.gitBranch, ctx.gitStatus.branch + dirtyMark);
+  let aheadBehind = "";
+  if (ctx.config.gitStatus.showAheadBehind) {
+    const a = ctx.gitStatus.ahead;
+    const b = ctx.gitStatus.behind;
+    if (a > 0 || b > 0) {
+      const aColor = ctx.config.gitStatus.pushCriticalThreshold > 0 && a >= ctx.config.gitStatus.pushCriticalThreshold ? c.critical : ctx.config.gitStatus.pushWarningThreshold > 0 && a >= ctx.config.gitStatus.pushWarningThreshold ? c.warning : c.gitBranch;
+      aheadBehind = ` ${color(aColor, `${glyph("up", ctx.config.display.glyphs)}${a}`)} ${color(c.gitBranch, `${glyph("down", ctx.config.display.glyphs)}${b}`)}`;
+    }
+  }
+  return `${wrapper("git:(")}${branch}${aheadBehind}${wrapper(")")}`;
+}
+function effortBlock(ctx) {
+  if (!ctx.config.display.showEffortLevel || !ctx.effortLevel)
+    return "";
+  return color(ctx.config.colors.label, `effort:${ctx.effortLevel}`);
+}
+function condenseModelId(nameOrId) {
+  let s = nameOrId.trim();
+  s = s.replace(/(-?(\[)?(\d+m|\d+k)\]?)$/i, "");
+  if (s.toLowerCase().startsWith("claude-"))
+    s = s.slice(7);
+  else if (s.toLowerCase().startsWith("claude "))
+    s = s.slice(7);
+  s = s.replace(/(\d)-(\d)/g, "$1.$2").toLowerCase();
+  return s;
+}
+var DEFAULT_CONTEXT = {
+  opus: "1M",
+  sonnet: "200K",
+  haiku: "200K"
+};
+function formatModelLabel(nameOrId) {
+  let s = nameOrId.trim();
+  if (!s)
+    return s;
+  if (s.toLowerCase().startsWith("claude-"))
+    s = s.slice(7);
+  s = s.replace(/-\d{8}$/, "");
+  let contextLabel = null;
+  const ctxMatch = /^(.*)-(\d+[kKmM])$/.exec(s);
+  if (ctxMatch) {
+    s = ctxMatch[1];
+    const raw = ctxMatch[2];
+    contextLabel = raw.slice(0, -1) + raw.slice(-1).toUpperCase();
+  }
+  const segments = s.split("-");
+  let splitIdx = segments.findIndex((seg) => /\d/.test(seg));
+  if (splitIdx === -1)
+    splitIdx = segments.length;
+  const wordSegs = segments.slice(0, splitIdx);
+  const versionSegs = segments.slice(splitIdx);
+  const wordPrefix = wordSegs.map((seg) => seg.charAt(0).toUpperCase() + seg.slice(1)).join("-");
+  const versionTokens = [];
+  for (const seg of versionSegs) {
+    if (/^\d+$/.test(seg)) {
+      if (versionTokens.length > 0) {
+        versionTokens[versionTokens.length - 1] += "." + seg;
+      } else {
+        versionTokens.push(seg);
+      }
+    } else if (/^[a-zA-Z]/.test(seg)) {
+      versionTokens.push(seg.charAt(0).toUpperCase() + seg.slice(1));
+    } else {
+      const unitMatch = /^(\d+)([a-zA-Z]+)$/.exec(seg);
+      versionTokens.push(unitMatch ? unitMatch[1] + unitMatch[2].toUpperCase() : seg);
+    }
+  }
+  const versionSuffix = versionTokens.join(" ");
+  const friendlyName = [wordPrefix, versionSuffix].filter(Boolean).join(" ");
+  if (contextLabel === null) {
+    const firstWord = (wordSegs[0] ?? segments[0] ?? "").toLowerCase();
+    contextLabel = DEFAULT_CONTEXT[firstWord] ?? null;
+  }
+  if (contextLabel)
+    return `${friendlyName} (${contextLabel})`;
+  return nameOrId.trim();
+}
+function remoteUrlToHttp(remoteUrl) {
+  if (!remoteUrl)
+    return;
+  const url = remoteUrl.trim();
+  if (!url)
+    return;
+  const sshMatch = /^git@(github\.com|gitlab\.com|bitbucket\.org):(.+?)(?:\.git)?$/.exec(url);
+  if (sshMatch) {
+    const host = sshMatch[1];
+    const path = sshMatch[2];
+    return `https://${host}/${path}`;
+  }
+  const httpsMatch = /^(https?:\/\/(?:github\.com|gitlab\.com|bitbucket\.org)\/[^?#]+?)(?:\.git)?\/?$/.exec(url);
+  if (httpsMatch) {
+    return httpsMatch[1];
+  }
+  return;
 }
 
 // src/doctor.ts
@@ -444,6 +826,38 @@ async function runDoctor(opts) {
   lines.push(`  ascii  :  ${row("ascii")}    (fallback)`);
   const spinnerCycle = [0, 1000, 2000, 3000].map((t) => spinnerFrame(t, "unicode")).join("  ");
   lines.push(`  spinner cycle: ${spinnerCycle}`);
+  lines.push("");
+  lines.push("Icons:");
+  lines.push(`  unicode → ${iconForMode("anthropic", "unicode")} (anthropic)   ${iconForMode("ollama", "unicode")} (ollama)`);
+  lines.push(`  ascii   → ${iconForMode("anthropic", "ascii")} (anthropic)   ${iconForMode("ollama", "ascii")} (ollama)`);
+  lines.push(`  nerd    → ${iconForMode("anthropic", "nerd")} (anthropic)   ${iconForMode("ollama", "nerd")} (ollama)`);
+  const lastModeRaw = (() => {
+    const p = join3(homedir2(), ".claude/plugins/ohud/last-mode.json");
+    if (!existsSync2(p))
+      return probe.daemonOk ? "ollama" : "anthropic";
+    try {
+      const parsed = JSON.parse(readFileSync2(p, "utf8"));
+      return parsed.mode ?? (probe.daemonOk ? "ollama" : "anthropic");
+    } catch {
+      return probe.daemonOk ? "ollama" : "anthropic";
+    }
+  })();
+  lines.push(`  auto    → ${iconForMode(lastModeRaw, "auto")} (resolved from last mode: ${lastModeRaw})`);
+  lines.push("");
+  lines.push("Model labels:");
+  const modelSamples = [
+    "claude-opus-4-7-1m",
+    "claude-opus-4-7",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+    "claude-haiku-4-5-20251001",
+    "kimi-k2-6-262k",
+    "gpt-oss-20b-128k",
+    "something-weird"
+  ];
+  for (const id of modelSamples) {
+    lines.push(`  ${id.padEnd(32)} → ${formatModelLabel(id)}`);
+  }
   const { annotations, warnings } = buildFlagAnnotations(cfg, activeLayout);
   lines.push(`
 active config flags (consumed?):`);
@@ -919,303 +1333,6 @@ function resolveEffortLevel(effort) {
     return effort.toLowerCase();
   if (typeof effort === "object" && typeof effort.level === "string")
     return effort.level.toLowerCase();
-  return;
-}
-
-// src/render/colors.ts
-var RESET = "\x1B[0m";
-var NAMED = {
-  dim: "\x1B[2m",
-  red: "\x1B[31m",
-  green: "\x1B[32m",
-  yellow: "\x1B[33m",
-  magenta: "\x1B[35m",
-  cyan: "\x1B[36m",
-  brightBlue: "\x1B[94m",
-  brightMagenta: "\x1B[95m"
-};
-function isColorDisabled(env) {
-  const e = env ?? process.env;
-  if (e.NO_COLOR !== undefined && e.NO_COLOR !== "")
-    return true;
-  if (e.TERM === "dumb")
-    return true;
-  return false;
-}
-function color(spec, text) {
-  if (isColorDisabled())
-    return text;
-  if (NAMED[spec])
-    return `${NAMED[spec]}${text}${RESET}`;
-  if (/^\d+$/.test(spec)) {
-    const n = Number.parseInt(spec, 10);
-    if (n >= 0 && n <= 255)
-      return `\x1B[38;5;${n}m${text}${RESET}`;
-  }
-  const m = /^#([0-9a-f]{6})$/i.exec(spec);
-  if (m) {
-    const hex = m[1];
-    const r = Number.parseInt(hex.slice(0, 2), 16);
-    const g = Number.parseInt(hex.slice(2, 4), 16);
-    const b = Number.parseInt(hex.slice(4, 6), 16);
-    return `\x1B[38;2;${r};${g};${b}m${text}${RESET}`;
-  }
-  return text;
-}
-
-// src/render/path.ts
-function basename(p) {
-  const parts = p.split("/").filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1] : "";
-}
-
-// src/render/width.ts
-var WIDTH_2_GLYPHS = new Set([
-  "⚡",
-  "⏱",
-  "◐",
-  "◜",
-  "◝",
-  "◞",
-  "◟",
-  "✓",
-  "▸",
-  "▹"
-]);
-function wcwidth(s) {
-  let w = 0;
-  for (const ch of s) {
-    if (WIDTH_2_GLYPHS.has(ch)) {
-      w += 2;
-      continue;
-    }
-    const cp = ch.codePointAt(0) ?? 0;
-    if (cp >= 127744 && cp <= 129791) {
-      w += 2;
-      continue;
-    }
-    if (cp >= 65072 && cp <= 65103) {
-      w += 2;
-      continue;
-    }
-    if (cp >= 11904 && cp <= 12350) {
-      w += 2;
-      continue;
-    }
-    if (cp >= 12353 && cp <= 13311) {
-      w += 2;
-      continue;
-    }
-    if (cp >= 13312 && cp <= 19903) {
-      w += 2;
-      continue;
-    }
-    if (cp >= 19968 && cp <= 40959) {
-      w += 2;
-      continue;
-    }
-    if (cp >= 44032 && cp <= 55203) {
-      w += 2;
-      continue;
-    }
-    w += 1;
-  }
-  return w;
-}
-var ANSI_RE = /\x1b\[[0-9;]*m|\x1b\]8;;[^\x07]*\x07/g;
-var ANSI_AT_START_RE = /^(?:\x1b\[[0-9;]*m|\x1b\]8;;[^\x07]*\x07)/;
-function visibleWidth(s) {
-  return wcwidth(s.replace(ANSI_RE, ""));
-}
-function truncateLine(line, max) {
-  if (visibleWidth(line) <= max)
-    return line;
-  let out = "";
-  let visible = 0;
-  let i = 0;
-  while (i < line.length && visible < max - 1) {
-    const slice = line.slice(i);
-    const match = ANSI_AT_START_RE.exec(slice);
-    if (match) {
-      out += match[0];
-      i += match[0].length;
-      continue;
-    }
-    const ch = line.slice(i, i + 1);
-    const w = wcwidth(ch);
-    if (visible + w > max - 1)
-      break;
-    out += ch;
-    visible += w;
-    i += 1;
-  }
-  return out + "…\x1B[0m";
-}
-function detectTerminalWidth(env, fallback) {
-  const cols = env.COLUMNS ? Number.parseInt(env.COLUMNS, 10) : NaN;
-  if (Number.isFinite(cols) && cols > 0)
-    return cols;
-  if (process.stdout.columns && process.stdout.columns > 0)
-    return process.stdout.columns;
-  return fallback ?? 120;
-}
-
-// src/render/widgets/_util.ts
-function maxLineWidth(s) {
-  return Math.max(0, ...s.split(`
-`).map(visibleWidth));
-}
-
-// src/render/widgets/project.ts
-var projectWidget = {
-  id: "project",
-  group: "header",
-  priority: 100,
-  minWidth: 20,
-  render(ctx) {
-    const body = renderProject(ctx);
-    if (body == null)
-      return null;
-    return { body, visualWidth: maxLineWidth(body) };
-  },
-  renderHush(ctx) {
-    const cells = [];
-    const projectDir = ctx.stdin.workspace?.project_dir?.trim() ?? "";
-    let projectName;
-    if (projectDir) {
-      projectName = basename(projectDir) || projectDir;
-    } else {
-      const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd ?? "";
-      const parts = dir.split("/").filter(Boolean);
-      projectName = parts.slice(-ctx.config.pathLevels).join("/") || "ohud";
-    }
-    cells.push({
-      group: "header",
-      text: projectName,
-      attention: "normal",
-      baseColor: "cyan",
-      link: projectDir ? `file://${projectDir}` : undefined
-    });
-    if (ctx.config.gitStatus.enabled && ctx.gitStatus) {
-      const dirty = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty;
-      const dirtyMark = dirty ? ctx.config.display.glyphs === "ascii" ? " *" : " ●" : "";
-      const branchText = ctx.gitStatus.branch + dirtyMark;
-      const attention = dirty ? "warning" : "normal";
-      const branchLink = remoteUrlToHttp(ctx.gitStatus.remoteUrl);
-      cells.push({
-        group: "header",
-        text: branchText,
-        attention,
-        baseColor: dirty ? undefined : "green",
-        link: branchLink
-      });
-    }
-    if (ctx.config.display.showModel) {
-      const rawId = ctx.stdin.model?.id ?? "";
-      const modelLabel = condenseModelId(rawId);
-      if (modelLabel) {
-        const anchor = rawId.replace(/\./g, "");
-        const modelUrl = anchor ? `https://docs.anthropic.com/en/docs/about-claude/models#${anchor}` : undefined;
-        cells.push({
-          group: "header",
-          text: modelLabel,
-          attention: "normal",
-          baseColor: "blue",
-          link: modelUrl
-        });
-      }
-    }
-    return cells;
-  }
-};
-function renderProject(ctx) {
-  const c = ctx.config;
-  const modelLabel = modelBadge(ctx);
-  const projectLabel = projectPath(ctx);
-  const gitLabel = gitBlock(ctx);
-  const effortLabel = effortBlock(ctx);
-  const parts = [];
-  if (c.display.showModel && modelLabel)
-    parts.push(color(c.colors.model, `[${modelLabel}]`));
-  if (projectLabel)
-    parts.push(color(c.colors.project, projectLabel));
-  if (gitLabel)
-    parts.push(gitLabel);
-  if (effortLabel)
-    parts.push(effortLabel);
-  return parts.join(color(c.colors.label, ` ${glyph("sep", c.display.glyphs)} `));
-}
-function modelBadge(ctx) {
-  const name = ctx.stdin.model?.display_name ?? ctx.stdin.model?.id ?? "model";
-  if (ctx.mode !== "ollama")
-    return name;
-  const cloudInfo = ctx.cloudModels.find((m) => m.name === ctx.stdin.model?.id || m.model === ctx.stdin.model?.id);
-  const param = cloudInfo?.details?.parameter_size;
-  return param ? `${name} ${glyph("bolt", ctx.config.display.glyphs)} ${param}` : name;
-}
-function projectPath(ctx) {
-  const projectDir = ctx.stdin.workspace?.project_dir?.trim() ?? "";
-  if (projectDir) {
-    const base = basename(projectDir);
-    if (base)
-      return base;
-  }
-  const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd ?? "";
-  if (!dir)
-    return "";
-  const parts = dir.split("/").filter(Boolean);
-  const n = ctx.config.pathLevels;
-  return parts.slice(-n).join("/");
-}
-function gitBlock(ctx) {
-  if (!ctx.config.gitStatus.enabled || !ctx.gitStatus)
-    return "";
-  const c = ctx.config.colors;
-  const wrapper = (s) => color(c.git, s);
-  const dirtyMark = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty ? "*" : "";
-  const branch = color(c.gitBranch, ctx.gitStatus.branch + dirtyMark);
-  let aheadBehind = "";
-  if (ctx.config.gitStatus.showAheadBehind) {
-    const a = ctx.gitStatus.ahead;
-    const b = ctx.gitStatus.behind;
-    if (a > 0 || b > 0) {
-      const aColor = ctx.config.gitStatus.pushCriticalThreshold > 0 && a >= ctx.config.gitStatus.pushCriticalThreshold ? c.critical : ctx.config.gitStatus.pushWarningThreshold > 0 && a >= ctx.config.gitStatus.pushWarningThreshold ? c.warning : c.gitBranch;
-      aheadBehind = ` ${color(aColor, `${glyph("up", ctx.config.display.glyphs)}${a}`)} ${color(c.gitBranch, `${glyph("down", ctx.config.display.glyphs)}${b}`)}`;
-    }
-  }
-  return `${wrapper("git:(")}${branch}${aheadBehind}${wrapper(")")}`;
-}
-function effortBlock(ctx) {
-  if (!ctx.config.display.showEffortLevel || !ctx.effortLevel)
-    return "";
-  return color(ctx.config.colors.label, `effort:${ctx.effortLevel}`);
-}
-function condenseModelId(nameOrId) {
-  let s = nameOrId.trim();
-  s = s.replace(/(-?(\[)?(\d+m|\d+k)\]?)$/i, "");
-  if (s.toLowerCase().startsWith("claude-"))
-    s = s.slice(7);
-  else if (s.toLowerCase().startsWith("claude "))
-    s = s.slice(7);
-  s = s.replace(/(\d)-(\d)/g, "$1.$2").toLowerCase();
-  return s;
-}
-function remoteUrlToHttp(remoteUrl) {
-  if (!remoteUrl)
-    return;
-  const url = remoteUrl.trim();
-  if (!url)
-    return;
-  const sshMatch = /^git@(github\.com|gitlab\.com|bitbucket\.org):(.+?)(?:\.git)?$/.exec(url);
-  if (sshMatch) {
-    const host = sshMatch[1];
-    const path = sshMatch[2];
-    return `https://${host}/${path}`;
-  }
-  const httpsMatch = /^(https?:\/\/(?:github\.com|gitlab\.com|bitbucket\.org)\/[^?#]+?)(?:\.git)?\/?$/.exec(url);
-  if (httpsMatch) {
-    return httpsMatch[1];
-  }
   return;
 }
 

@@ -5,7 +5,7 @@
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { projectWidget } from "../src/render/widgets/project.js";
+import { projectWidget, formatModelLabel } from "../src/render/widgets/project.js";
 import { contextWidget } from "../src/render/widgets/context.js";
 import { apiTimeWidget } from "../src/render/widgets/api-time.js";
 import { usageWidget } from "../src/render/widgets/usage.js";
@@ -683,13 +683,13 @@ test("project renderHush — dirty marker uses ' *' in ascii mode", () => {
   expect(branchCell?.text).toBe("main *");
 });
 
-test("project renderHush — model strips [1m] suffix: claude-opus-4-7-1m → opus-4.7", () => {
+test("project renderHush — model formats with context suffix: claude-opus-4-7-1m → Opus 4.7 (1M)", () => {
   const stdin: StdinData = { model: { id: "claude-opus-4-7-1m" }, workspace: { current_dir: "/x" } };
   const ctx = makeCtx(stdin, "anthropic");
   ctx.gitStatus = null;
   const cells = projectWidget.renderHush!(ctx) as HushCell[];
-  const modelCell = cells.find((c) => c.group === "header" && c.text.includes("opus"));
-  expect(modelCell?.text).toBe("opus-4.7");
+  const modelCell = cells.find((c) => c.group === "header" && c.text.includes("Opus"));
+  expect(modelCell?.text).toBe("Opus 4.7 (1M)");
 });
 
 test("context renderHush — appends capacity when context_window_size > 200k", () => {
@@ -912,6 +912,42 @@ test("render orchestrator splits multi-line renderer output into separate lines"
   expect(agentLines.length).toBe(2);
   expect(agentLines.some((l) => l.includes("explore") && !l.includes("review"))).toBe(true);
   expect(agentLines.some((l) => l.includes("review") && !l.includes("explore"))).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// formatModelLabel tests — full input/output matrix
+// ---------------------------------------------------------------------------
+
+test("formatModelLabel: claude-opus-4-7-1m → Opus 4.7 (1M)", () => {
+  expect(formatModelLabel("claude-opus-4-7-1m")).toBe("Opus 4.7 (1M)");
+});
+
+test("formatModelLabel: claude-opus-4-7 → Opus 4.7 (1M) (default lookup)", () => {
+  expect(formatModelLabel("claude-opus-4-7")).toBe("Opus 4.7 (1M)");
+});
+
+test("formatModelLabel: claude-sonnet-4-6 → Sonnet 4.6 (200K)", () => {
+  expect(formatModelLabel("claude-sonnet-4-6")).toBe("Sonnet 4.6 (200K)");
+});
+
+test("formatModelLabel: claude-haiku-4-5 → Haiku 4.5 (200K)", () => {
+  expect(formatModelLabel("claude-haiku-4-5")).toBe("Haiku 4.5 (200K)");
+});
+
+test("formatModelLabel: claude-haiku-4-5-20251001 → Haiku 4.5 (200K) (date stamp stripped)", () => {
+  expect(formatModelLabel("claude-haiku-4-5-20251001")).toBe("Haiku 4.5 (200K)");
+});
+
+test("formatModelLabel: kimi-k2-6-262k → Kimi K2.6 (262K)", () => {
+  expect(formatModelLabel("kimi-k2-6-262k")).toBe("Kimi K2.6 (262K)");
+});
+
+test("formatModelLabel: gpt-oss-20b-128k → Gpt-Oss 20B (128K)", () => {
+  expect(formatModelLabel("gpt-oss-20b-128k")).toBe("Gpt-Oss 20B (128K)");
+});
+
+test("formatModelLabel: something-weird → passthrough (no parens)", () => {
+  expect(formatModelLabel("something-weird")).toBe("something-weird");
 });
 
 test("render returns minimum line (model name) when all renderers null", () => {

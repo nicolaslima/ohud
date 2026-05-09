@@ -15,6 +15,9 @@ export type GlyphKey =
   | "barFull" | "barEmpty"
   | "up" | "down";
 
+/** Icon override modes for iconForMode(). "auto" = derive from session mode. */
+export type IconMode = "auto" | "anthropic" | "ollama" | "none";
+
 const UNICODE: Record<GlyphKey, string> = {
   bolt:     "⚡",
   clock:    "⏱",
@@ -66,4 +69,67 @@ export function glyph(key: GlyphKey, mode: GlyphMode): string {
   if (resolved === "nerd")  return NERD[key] ?? UNICODE[key];
   if (resolved === "ascii") return ASCII[key];
   return UNICODE[key];
+}
+
+// ---------------------------------------------------------------------------
+// iconForMode — brand icon picker for the prose statusline
+// ---------------------------------------------------------------------------
+//
+// Icons are kept in a small inline table rather than merged with the GlyphKey
+// tables above, because they carry semantic meaning tied to the session mode
+// (anthropic/ollama) rather than a UI concept (bolt, clock…). Keeping them
+// separate avoids polluting GlyphKey with brand identifiers.
+//
+// NOTE: 🦙 (U+1F999) falls in the emoji range 0x1F300–0x1FAFF, so wcwidth()
+// in src/render/width.ts already counts it as width-2 via the emoji block
+// check. No explicit WIDTH_2_GLYPHS entry is needed.
+
+type IconVariant = "anthropic" | "ollama";
+
+const ICON_UNICODE: Record<IconVariant, string> = {
+  anthropic: "✱",   // U+2731 EIGHT SPOKED ASTERISK
+  ollama:    "🦙",  // U+1F999 LLAMA
+};
+
+// nf-fa-asterisk (U+F069) for anthropic; ollama has no Nerd Font glyph → falls back.
+const ICON_NERD: Partial<Record<IconVariant, string>> = {
+  anthropic: "",   // nf-fa-asterisk U+F069
+};
+
+const ICON_ASCII: Record<IconVariant, string> = {
+  anthropic: "*",
+  ollama:    "L",
+};
+
+/**
+ * Pick the brand icon for the current session mode.
+ *
+ * @param mode     Session mode ("anthropic" | "ollama" | any other string treated as "unknown")
+ * @param glyphMode The terminal glyph tier (unicode / ascii / nerd / auto)
+ * @param override  "auto" = derive from mode; "anthropic"/"ollama" = use that brand; "none" = ""
+ */
+export function iconForMode(
+  mode: import("../types.js").RenderMode,
+  glyphMode: GlyphMode,
+  override: IconMode = "auto",
+): string {
+  // Resolve which brand icon to use
+  let variant: IconVariant | null;
+  if (override === "none") return "";
+  if (override === "auto") {
+    if (mode === "anthropic") variant = "anthropic";
+    else if (mode === "ollama") variant = "ollama";
+    else variant = null; // unknown mode → no icon
+  } else {
+    variant = override; // explicit brand override
+  }
+
+  if (variant === null) return "";
+
+  // Resolve glyph tier (same auto-detection as glyph())
+  const tier = glyphMode === "auto" ? autoMode() : glyphMode;
+
+  if (tier === "ascii") return ICON_ASCII[variant];
+  if (tier === "nerd")  return ICON_NERD[variant] ?? ICON_UNICODE[variant];
+  return ICON_UNICODE[variant];
 }

@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { probeOllama } from "./ollama-probe.js";
 import { loadConfig } from "./config.js";
-import { glyph } from "./render/glyphs.js";
+import { glyph, iconForMode } from "./render/glyphs.js";
 import { spinnerFrame } from "./render/spinner.js";
+import { formatModelLabel } from "./render/widgets/project.js";
 import type { HudConfig } from "./types.js";
 
 // Layout affinity for each display.* flag:
@@ -140,6 +141,40 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
   lines.push(`  ascii  :  ${row("ascii")}    (fallback)`);
   const spinnerCycle = [0, 1000, 2000, 3000].map((t) => spinnerFrame(t, "unicode")).join("  ");
   lines.push(`  spinner cycle: ${spinnerCycle}`);
+
+  // Brand icon preview — three tiers plus auto resolved from the last-rendered mode.
+  lines.push("");
+  lines.push("Icons:");
+  lines.push(`  unicode → ${iconForMode("anthropic", "unicode")} (anthropic)   ${iconForMode("ollama", "unicode")} (ollama)`);
+  lines.push(`  ascii   → ${iconForMode("anthropic", "ascii")} (anthropic)   ${iconForMode("ollama", "ascii")} (ollama)`);
+  lines.push(`  nerd    → ${iconForMode("anthropic", "nerd")} (anthropic)   ${iconForMode("ollama", "nerd")} (ollama)`);
+  // Resolve auto from last-rendered mode (best-effort; unknown falls back to daemon probe result)
+  const lastModeRaw = (() => {
+    const p = join(homedir(), ".claude/plugins/ohud/last-mode.json");
+    if (!existsSync(p)) return probe.daemonOk ? "ollama" : "anthropic";
+    try {
+      const parsed = JSON.parse(readFileSync(p, "utf8")) as { mode?: string };
+      return parsed.mode ?? (probe.daemonOk ? "ollama" : "anthropic");
+    } catch { return probe.daemonOk ? "ollama" : "anthropic"; }
+  })() as import("./types.js").RenderMode;
+  lines.push(`  auto    → ${iconForMode(lastModeRaw, "auto")} (resolved from last mode: ${lastModeRaw})`);
+
+  // Model label samples — demonstrates formatModelLabel across representative ids.
+  lines.push("");
+  lines.push("Model labels:");
+  const modelSamples = [
+    "claude-opus-4-7-1m",
+    "claude-opus-4-7",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+    "claude-haiku-4-5-20251001",
+    "kimi-k2-6-262k",
+    "gpt-oss-20b-128k",
+    "something-weird",
+  ];
+  for (const id of modelSamples) {
+    lines.push(`  ${id.padEnd(32)} → ${formatModelLabel(id)}`);
+  }
 
   const { annotations, warnings } = buildFlagAnnotations(cfg, activeLayout);
 
