@@ -2,7 +2,7 @@
 import type { Widget, WidgetCell } from "../widget.js";
 import type { RenderContext } from "../../types.js";
 import { renderAgents } from "../lines/agents.js";
-import { visibleWidth } from "../width.js";
+import { maxLineWidth } from "./_util.js";
 
 export const agentsWidget: Widget = {
   id: "agents",
@@ -13,6 +13,9 @@ export const agentsWidget: Widget = {
   render(ctx: RenderContext): WidgetCell | null {
     const body = renderAgents(ctx);
     if (body == null) return null;
-    return { id: "agents", group: "activity", body, visualWidth: visibleWidth(body) };
+    // id/group injected by orchestrator. renderAgents emits `\n` for ≥2
+    // running agents; use maxLineWidth so visualWidth reflects the widest
+    // physical row, not the sum.
+    return { body, visualWidth: maxLineWidth(body) };
   },
 };

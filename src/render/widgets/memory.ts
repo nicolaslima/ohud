@@ -2,7 +2,7 @@
 import type { Widget, WidgetCell } from "../widget.js";
 import type { RenderContext } from "../../types.js";
 import { renderMemory } from "../lines/memory.js";
-import { visibleWidth } from "../width.js";
+import { maxLineWidth } from "./_util.js";
 
 export const memoryWidget: Widget = {
   id: "memory",
@@ -13,6 +13,7 @@ export const memoryWidget: Widget = {
   render(ctx: RenderContext): WidgetCell | null {
     const body = renderMemory(ctx);
     if (body == null) return null;
-    return { id: "memory", group: "metrics", body, visualWidth: visibleWidth(body) };
+    // id/group injected by orchestrator
+    return { body, visualWidth: maxLineWidth(body) };
   },
 };

@@ -2,7 +2,7 @@
 import type { Widget, WidgetCell } from "../widget.js";
 import type { RenderContext } from "../../types.js";
 import { renderCost } from "../lines/cost.js";
-import { visibleWidth } from "../width.js";
+import { maxLineWidth } from "./_util.js";
 
 export const costWidget: Widget = {
   id: "cost",
@@ -13,6 +13,7 @@ export const costWidget: Widget = {
   render(ctx: RenderContext): WidgetCell | null {
     const body = renderCost(ctx);
     if (body == null) return null;
-    return { id: "cost", group: "metrics", body, visualWidth: visibleWidth(body) };
+    // id/group injected by orchestrator
+    return { body, visualWidth: maxLineWidth(body) };
   },
 };

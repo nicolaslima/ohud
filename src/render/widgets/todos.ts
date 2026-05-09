@@ -2,7 +2,7 @@
 import type { Widget, WidgetCell } from "../widget.js";
 import type { RenderContext } from "../../types.js";
 import { renderTodos } from "../lines/todos.js";
-import { visibleWidth } from "../width.js";
+import { maxLineWidth } from "./_util.js";
 
 export const todosWidget: Widget = {
   id: "todos",
@@ -13,6 +13,7 @@ export const todosWidget: Widget = {
   render(ctx: RenderContext): WidgetCell | null {
     const body = renderTodos(ctx);
     if (body == null) return null;
-    return { id: "todos", group: "activity", body, visualWidth: visibleWidth(body) };
+    // id/group injected by orchestrator
+    return { body, visualWidth: maxLineWidth(body) };
   },
 };

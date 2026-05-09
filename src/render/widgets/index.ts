@@ -22,7 +22,7 @@ import { environmentWidget } from "./environment.js";
 export const WIDGETS: readonly Widget[] = [
   projectWidget,    // header,   priority 100
   contextWidget,    // metrics,  priority 90
-  apiTimeWidget,    // metrics,  priority 80
+  apiTimeWidget,    // metrics,  priority 82 (slightly above usage — more frequent updates in Ollama mode)
   usageWidget,      // metrics,  priority 80
   costWidget,       // metrics,  priority 70
   promptCacheWidget,// metrics,  priority 60

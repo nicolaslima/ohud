@@ -2,7 +2,7 @@
 import type { Widget, WidgetCell } from "../widget.js";
 import type { RenderContext } from "../../types.js";
 import { renderEnvironment } from "../lines/environment.js";
-import { visibleWidth } from "../width.js";
+import { maxLineWidth } from "./_util.js";
 
 export const environmentWidget: Widget = {
   id: "environment",
@@ -13,6 +13,7 @@ export const environmentWidget: Widget = {
   render(ctx: RenderContext): WidgetCell | null {
     const body = renderEnvironment(ctx);
     if (body == null) return null;
-    return { id: "environment", group: "activity", body, visualWidth: visibleWidth(body) };
+    // id/group injected by orchestrator
+    return { body, visualWidth: maxLineWidth(body) };
   },
 };

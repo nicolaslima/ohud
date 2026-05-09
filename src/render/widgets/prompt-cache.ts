@@ -2,7 +2,7 @@
 import type { Widget, WidgetCell } from "../widget.js";
 import type { RenderContext } from "../../types.js";
 import { renderPromptCache } from "../lines/prompt-cache.js";
-import { visibleWidth } from "../width.js";
+import { maxLineWidth } from "./_util.js";
 
 export const promptCacheWidget: Widget = {
   id: "promptCache",
@@ -13,6 +13,7 @@ export const promptCacheWidget: Widget = {
   render(ctx: RenderContext): WidgetCell | null {
     const body = renderPromptCache(ctx);
     if (body == null) return null;
-    return { id: "promptCache", group: "metrics", body, visualWidth: visibleWidth(body) };
+    // id/group injected by orchestrator
+    return { body, visualWidth: maxLineWidth(body) };
   },
 };

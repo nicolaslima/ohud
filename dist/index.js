@@ -961,6 +961,12 @@ function detectTerminalWidth(env, fallback) {
   return fallback ?? 120;
 }
 
+// src/render/widgets/_util.ts
+function maxLineWidth(s) {
+  return Math.max(0, ...s.split(`
+`).map(visibleWidth));
+}
+
 // src/render/widgets/project.ts
 var projectWidget = {
   id: "project",
@@ -971,7 +977,7 @@ var projectWidget = {
     const body = renderProject(ctx);
     if (body == null)
       return null;
-    return { id: "project", group: "header", body, visualWidth: visibleWidth(body) };
+    return { body, visualWidth: maxLineWidth(body) };
   }
 };
 
@@ -1035,7 +1041,7 @@ var contextWidget = {
     const body = renderContext(ctx);
     if (body == null)
       return null;
-    return { id: "context", group: "metrics", body, visualWidth: visibleWidth(body) };
+    return { body, visualWidth: maxLineWidth(body) };
   }
 };
 
@@ -1068,13 +1074,13 @@ function formatDuration(ms) {
 var apiTimeWidget = {
   id: "apiTime",
   group: "metrics",
-  priority: 80,
+  priority: 82,
   minWidth: 14,
   render(ctx) {
     const body = renderApiTime(ctx);
     if (body == null)
       return null;
-    return { id: "apiTime", group: "metrics", body, visualWidth: visibleWidth(body) };
+    return { body, visualWidth: maxLineWidth(body) };
   }
 };
 
@@ -1153,7 +1159,7 @@ var usageWidget = {
     const body = renderUsage(ctx);
     if (body == null)
       return null;
-    return { id: "usage", group: "metrics", body, visualWidth: visibleWidth(body) };
+    return { body, visualWidth: maxLineWidth(body) };
   }
 };
 
@@ -1182,7 +1188,7 @@ var costWidget = {
     const body = renderCost(ctx);
     if (body == null)
       return null;
-    return { id: "cost", group: "metrics", body, visualWidth: visibleWidth(body) };
+    return { body, visualWidth: maxLineWidth(body) };
   }
 };
 
@@ -1226,7 +1232,7 @@ var promptCacheWidget = {
     const body = renderPromptCache(ctx);
     if (body == null)
       return null;
-    return { id: "promptCache", group: "metrics", body, visualWidth: visibleWidth(body) };
+    return { body, visualWidth: maxLineWidth(body) };
   }
 };
 
@@ -1265,7 +1271,7 @@ var memoryWidget = {
     const body = renderMemory(ctx);
     if (body == null)
       return null;
-    return { id: "memory", group: "metrics", body, visualWidth: visibleWidth(body) };
+    return { body, visualWidth: maxLineWidth(body) };
   }
 };
 
@@ -1311,7 +1317,7 @@ var durationWidget = {
     const body = renderDuration(ctx);
     if (body == null)
       return null;
-    return { id: "duration", group: "metrics", body, visualWidth: visibleWidth(body) };
+    return { body, visualWidth: maxLineWidth(body) };
   }
 };
 
@@ -1371,7 +1377,7 @@ var toolsWidget = {
     const body = renderTools(ctx);
     if (body == null)
       return null;
-    return { id: "tools", group: "activity", body, visualWidth: visibleWidth(body) };
+    return { body, visualWidth: maxLineWidth(body) };
   }
 };
 
@@ -1434,7 +1440,7 @@ var agentsWidget = {
     const body = renderAgents(ctx);
     if (body == null)
       return null;
-    return { id: "agents", group: "activity", body, visualWidth: visibleWidth(body) };
+    return { body, visualWidth: maxLineWidth(body) };
   }
 };
 
@@ -1463,7 +1469,7 @@ var todosWidget = {
     const body = renderTodos(ctx);
     if (body == null)
       return null;
-    return { id: "todos", group: "activity", body, visualWidth: visibleWidth(body) };
+    return { body, visualWidth: maxLineWidth(body) };
   }
 };
 
@@ -1545,7 +1551,7 @@ var environmentWidget = {
     const body = renderEnvironment(ctx);
     if (body == null)
       return null;
-    return { id: "environment", group: "activity", body, visualWidth: visibleWidth(body) };
+    return { body, visualWidth: maxLineWidth(body) };
   }
 };
 

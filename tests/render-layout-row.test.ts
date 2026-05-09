@@ -376,27 +376,125 @@ describe("Scenario 8: cost hidden when showCost=false and totalUsd=0", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Bonus: fallback sentinel when render has no content
+// Scenario 9: Ollama mode with showContextBar=false — apiTime appears alone
+// (covers the third merge branch: ctxCell=null, rightCell=present)
+// ---------------------------------------------------------------------------
+
+describe("Scenario 9: ollama mode, context suppressed, apiTime alone on line 2", () => {
+  test("line 2 contains apiTime body alone with no leading separator", () => {
+    const ctx = makeCtx({
+      mode: "ollama",
+      stdin: {
+        model: { id: "glm-5:cloud", display_name: "glm-5:cloud" },
+        workspace: { current_dir: "/Users/lima/Projects/ohud", project_dir: "/Users/lima/Projects/ohud" },
+        context_window: { context_window_size: 128000, used_percentage: 45 },
+        cost: { total_api_duration_ms: 75_000 },
+      },
+    });
+    ctx.config.display.showContextBar = false;
+    ctx.config.maxWidth = 120;
+
+    const out = render(ctx);
+    const lines = out.split("\n");
+
+    // Confirm the visibility gate behavior: context widget is not in visibleWidgets
+    // anymore, so renderContext is never invoked and line 2 = apiTime alone.
+    expect(lines.length).toBe(2);
+
+    // Line 2 should equal apiTime body exactly — no merge, no leading sep.
+    const apiPart = renderApiTime(ctx)!;
+    expect(lines[1]).toBe(apiPart);
+
+    // Confirm no orphan separator (` │ `) at start or end of line 2.
+    expect(lines[1]).not.toMatch(/^\s*│/);
+    expect(lines[1]).not.toMatch(/│\s*$/);
+    // No "Context" anywhere.
+    expect(lines[1]).not.toContain("Context");
+  });
+
+  test("anthropic mode equivalent: showContextBar=false + usage present → usage alone", () => {
+    const ctx = makeCtx({
+      usageData: { fiveHour: 25, sevenDay: 41, fiveHourResetAt: null, sevenDayResetAt: null },
+    });
+    ctx.config.display.showContextBar = false;
+    ctx.config.maxWidth = 200;
+
+    const out = render(ctx);
+    const lines = out.split("\n");
+    expect(lines.length).toBe(2);
+
+    const usagePart = renderUsage(ctx)!;
+    expect(lines[1]).toBe(usagePart);
+    expect(lines[1]).not.toContain("Context");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fallback sentinel: render returns the exact sentinel when ALL widgets gate off
 // ---------------------------------------------------------------------------
 
 describe("Fallback sentinel", () => {
-  test("returns 'ohud' sentinel when context_window has no used_percentage", () => {
-    const ctx = makeCtx({
-      stdin: {
-        model: { id: "claude-opus-4-7", display_name: "Opus 4.7" },
-        // No workspace → renderProject returns "" (parts.join returns "" which is falsy)
-        workspace: {},
-        context_window: {},
-      },
+  test("returns exact 'ohud' sentinel string when every widget produces nothing", () => {
+    // Build a context where every visible widget either gates off or produces
+    // an empty body. Recipe:
+    //   - No model, no workspace → renderProject returns "" (empty parts list)
+    //   - showContextBar=false → context widget filtered out
+    //   - showApiTime=false / mode=anthropic → apiTime renders null
+    //   - showUsage=false / no usageData → usage renders null
+    //   - costData=null → cost renders null
+    //   - All other show* flags default false → those widgets filtered out
+    const ctx: RenderContext = {
+      mode: "anthropic",
+      stdin: {}, // no model, no workspace, no context_window
+      transcript: { tools: [], agents: [], todos: [] },
       gitStatus: null,
-    });
-    ctx.config.display.showModel = false; // suppress model badge
+      config: structuredClone(DEFAULT_CONFIG),
+      usageData: null,
+      costData: null,
+      memoryInfo: null,
+      cloudModels: [],
+    };
+    ctx.config.display.showModel = false;       // suppress model badge
+    ctx.config.display.showContextBar = false;  // gate context widget out
+    ctx.config.display.showApiTime = false;     // gate apiTime widget out
+    ctx.config.display.showUsage = false;       // gate usage widget out
+    ctx.config.display.showEffortLevel = false; // suppress effort label
+    ctx.config.gitStatus.enabled = false;       // suppress git block
     ctx.config.maxWidth = 120;
 
-    // Even with empty workspace, project still returns something (empty string gets filtered)
-    // The important thing is render() never throws and returns something
+    // Sanity: project widget produces empty body (all parts list is empty)
+    expect(renderProject(ctx)).toBe("");
+
     const out = render(ctx);
-    expect(out.length).toBeGreaterThan(0);
+    // Exact sentinel string with ANSI wrapper from color()
+    const expectedSentinel = color(ctx.config.colors.label, "ohud");
+    expect(out).toBe(expectedSentinel);
+  });
+
+  test("sentinel fires even when project body would otherwise be empty string", () => {
+    // Same as above but verify by exact string match the sentinel includes
+    // the dim ANSI wrapper (since colors.label = "dim" by default).
+    const ctx: RenderContext = {
+      mode: "anthropic",
+      stdin: {},
+      transcript: { tools: [], agents: [], todos: [] },
+      gitStatus: null,
+      config: structuredClone(DEFAULT_CONFIG),
+      usageData: null,
+      costData: null,
+      memoryInfo: null,
+      cloudModels: [],
+    };
+    ctx.config.display.showModel = false;
+    ctx.config.display.showContextBar = false;
+    ctx.config.display.showApiTime = false;
+    ctx.config.display.showUsage = false;
+    ctx.config.display.showEffortLevel = false;
+    ctx.config.gitStatus.enabled = false;
+
+    const out = render(ctx);
+    // colors.label="dim" → \x1b[2m + ohud + \x1b[0m
+    expect(out).toBe("\x1b[2mohud\x1b[0m");
   });
 });
 

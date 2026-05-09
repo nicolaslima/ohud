@@ -2,7 +2,7 @@
 import type { Widget, WidgetCell } from "../widget.js";
 import type { RenderContext } from "../../types.js";
 import { renderTools } from "../lines/tools.js";
-import { visibleWidth } from "../width.js";
+import { maxLineWidth } from "./_util.js";
 
 export const toolsWidget: Widget = {
   id: "tools",
@@ -13,6 +13,8 @@ export const toolsWidget: Widget = {
   render(ctx: RenderContext): WidgetCell | null {
     const body = renderTools(ctx);
     if (body == null) return null;
-    return { id: "tools", group: "activity", body, visualWidth: visibleWidth(body) };
+    // id/group injected by orchestrator. Use maxLineWidth in case
+    // a future renderer emits multi-line bodies.
+    return { body, visualWidth: maxLineWidth(body) };
   },
 };
