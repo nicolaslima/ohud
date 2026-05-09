@@ -1078,12 +1078,33 @@ function renderTools(ctx) {
   const completed = tools.filter((t) => t.status === "completed");
   const c = ctx.config.colors;
   const parts = [];
-  for (const t of running)
-    parts.push(`${color(c.label, glyph("running", ctx.config.display.glyphs))} ${t.name}${t.target ? `: ${basename(t.target)}` : ""}`);
+  for (const g of groupRunning(running).values()) {
+    const targetSuffix = g.target ? `: ${basename(g.target)}` : "";
+    const countSuffix = g.count > 1 ? ` ×${g.count}` : "";
+    parts.push(`${color(c.label, glyph("running", ctx.config.display.glyphs))} ${g.name}${countSuffix}${targetSuffix}`);
+  }
   const tally = countByName(completed);
   for (const [name, count] of tally)
     parts.push(`${color(c.label, glyph("done", ctx.config.display.glyphs))} ${name}${count > 1 ? ` ×${count}` : ""}`);
   return parts.join(color(c.label, " | "));
+}
+function groupRunning(entries) {
+  const out = new Map;
+  for (const t of entries) {
+    const sameNameAny = [...out.values()].find((g) => g.name === t.name);
+    if (sameNameAny && sameNameAny.target !== t.target) {
+      sameNameAny.target = undefined;
+      sameNameAny.count += 1;
+      continue;
+    }
+    const key = `${t.name}\x00${t.target ?? ""}`;
+    const existing = out.get(key);
+    if (existing)
+      existing.count += 1;
+    else
+      out.set(key, { name: t.name, target: t.target, count: 1 });
+  }
+  return out;
 }
 function countByName(entries) {
   const m = new Map;
@@ -1100,14 +1121,39 @@ function renderAgents(ctx) {
   if (agents.length === 0)
     return null;
   const c = ctx.config.colors;
-  const parts = agents.map((a) => {
-    const sym = a.status === "running" ? glyph("running", ctx.config.display.glyphs) : glyph("done", ctx.config.display.glyphs);
-    const modelTag = a.model ? ` [${a.model}]` : "";
-    const desc = a.description ? `: ${a.description}` : "";
-    const elapsed = a.endTime ? "" : ` (${formatElapsed(a.startTime)})`;
-    return `${color(c.label, sym)} ${a.type}${modelTag}${desc}${color(c.label, elapsed)}`;
-  });
-  return parts.join(color(c.label, " | "));
+  const running = agents.filter((a) => a.status === "running");
+  const completed = agents.filter((a) => a.status === "completed");
+  const lines = [];
+  if (running.length === 1) {
+    lines.push(formatRunningAgent(running[0], ctx));
+  } else if (running.length >= 2) {
+    for (const a of running)
+      lines.push(formatRunningAgent(a, ctx));
+  }
+  if (completed.length > 0) {
+    const tally = countByType(completed);
+    const completedParts = [];
+    for (const [type, count] of tally) {
+      completedParts.push(`${color(c.label, glyph("done", ctx.config.display.glyphs))} ${type}${count > 1 ? ` ×${count}` : ""}`);
+    }
+    lines.push(completedParts.join(color(c.label, " | ")));
+  }
+  return lines.length > 0 ? lines.join(`
+`) : null;
+}
+function formatRunningAgent(a, ctx) {
+  const c = ctx.config.colors;
+  const sym = glyph("running", ctx.config.display.glyphs);
+  const modelTag = a.model ? ` [${a.model}]` : "";
+  const desc = a.description ? `: ${a.description}` : "";
+  const elapsed = a.endTime ? "" : ` (${formatElapsed(a.startTime)})`;
+  return `${color(c.label, sym)} ${a.type}${modelTag}${desc}${color(c.label, elapsed)}`;
+}
+function countByType(entries) {
+  const m = new Map;
+  for (const e of entries)
+    m.set(e.type, (m.get(e.type) ?? 0) + 1);
+  return m;
 }
 function formatElapsed(start) {
   const sec = Math.floor((Date.now() - start.getTime()) / 1000);
@@ -1356,11 +1402,11 @@ function render(ctx) {
   if (order.includes("project")) {
     const p = renderProject(ctx);
     if (p)
-      lines.push(p);
+      pushLines(lines, p);
   }
   const merged = collectMerged(ctx);
   if (merged)
-    lines.push(merged);
+    pushLines(lines, merged);
   const rendered = new Set(["project", "context", "apiTime", "usage"]);
   for (const key of order) {
     if (rendered.has(key))
@@ -1370,7 +1416,7 @@ function render(ctx) {
       continue;
     const out = fn(ctx);
     if (out)
-      lines.push(out);
+      pushLines(lines, out);
     rendered.add(key);
   }
   const max = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
@@ -1380,6 +1426,13 @@ function render(ctx) {
   }
   return truncated.join(`
 `);
+}
+function pushLines(lines, out) {
+  for (const ln of out.split(`
+`)) {
+    if (ln.length > 0)
+      lines.push(ln);
+  }
 }
 function collectMerged(ctx) {
   const ctxLine = renderContext(ctx);

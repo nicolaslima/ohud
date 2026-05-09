@@ -40,12 +40,12 @@ export function render(ctx: RenderContext): string {
   // Line 1: project
   if (order.includes("project")) {
     const p = renderProject(ctx);
-    if (p) lines.push(p);
+    if (p) pushLines(lines, p);
   }
 
   // Line 2: context (left) merged with apiTime|usage (right) per mergeGroups
   const merged = collectMerged(ctx);
-  if (merged) lines.push(merged);
+  if (merged) pushLines(lines, merged);
 
   // Subsequent lines: in elementOrder, skipping already-rendered ones
   const rendered = new Set<string>(["project", "context", "apiTime", "usage"]);
@@ -54,7 +54,7 @@ export function render(ctx: RenderContext): string {
     const fn = LINE_REGISTRY[key];
     if (!fn) continue;
     const out = fn(ctx);
-    if (out) lines.push(out);
+    if (out) pushLines(lines, out);
     rendered.add(key);
   }
 
@@ -66,6 +66,15 @@ export function render(ctx: RenderContext): string {
     return color(ctx.config.colors.label, "ohud");
   }
   return truncated.join("\n");
+}
+
+// Split renderer output on `\n` so any line module can return multi-line strings
+// (e.g. agents with 2+ running entries — see `src/render/lines/agents.ts`).
+// Empty lines are filtered. Truncation downstream stays per-line.
+function pushLines(lines: string[], out: string): void {
+  for (const ln of out.split("\n")) {
+    if (ln.length > 0) lines.push(ln);
+  }
 }
 
 function collectMerged(ctx: RenderContext): string | null {

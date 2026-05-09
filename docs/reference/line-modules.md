@@ -303,13 +303,24 @@ Se você está compondo a próxima mensagem perto do limite, vale esperar — ou
 ### O que renderiza
 
 ```
-◐ Read: index.ts | ✓ Edit ×3 | ✓ Bash ×2
+◐ Read: index.ts | ◐ Edit ×3: foo.ts | ✓ Edit ×3 | ✓ Bash ×2
 ```
 
 Dois grupos:
 
-1. **Running** (`status === "running"`): mostra cada tool individualmente com seu target (`basename` do path) — saber *qual* arquivo está sendo lido importa.
+1. **Running** (`status === "running"`): dedup por `(name, target)` para evitar entradas duplicadas em paralelo (e.g. três `Edit` simultâneos no mesmo arquivo). Saber *qual* arquivo está sendo lido importa quando único; quando vários, mostra a contagem.
 2. **Completed** (`status === "completed"`): tally por nome com `×N`. Detalhes individuais não importam — só a frequência.
+
+### Dedup das running tools
+
+| Cenário | Saída |
+|---|---|
+| 1 running, sem target | `◐ Edit` |
+| 1 running, com target | `◐ Edit: foo.ts` |
+| N running, mesmo target | `◐ Edit ×N: foo.ts` |
+| N running, targets diferentes | `◐ Edit ×N` (target removido — seria ambíguo) |
+
+A dedup é feita por `(name, target)`. Quando o mesmo `name` aparece com targets distintos, colapsa para uma única entrada sem target — mostrar um `basename` específico seria enganoso.
 
 ### Stdin/transcript consumido
 
@@ -330,11 +341,37 @@ Dois grupos:
 
 ### O que renderiza
 
+Com **um** agent rodando (ou nenhum, com summary):
+
 ```
-◐ general-purpose [claude-sonnet-4-6]: search for cache references (1m 23s) | ✓ Explore: …
+◐ general-purpose [claude-sonnet-4-6]: search for cache references (1m 23s)
+✓ explore ×2 | ✓ review
 ```
 
-Por agent: glyph (`running`/`done`) + tipo + model tag opcional + descrição opcional + elapsed (apenas se ainda running).
+Com **2+** agents rodando em paralelo, cada um vai para sua própria linha (caso contrário a linha estoura a largura do terminal e é truncada):
+
+```
+◐ explore [haiku]: A (12s)
+◐ review [sonnet]: B (8s)
+◐ debug: C (3s)
+✓ explore ×2
+```
+
+Por agent running: glyph + tipo + model tag opcional + descrição opcional + elapsed.
+Completed: tally por tipo (`✓ <type> ×<count>`) numa única linha trailing.
+
+### Layout multi-linha
+
+| Cenário | Saída |
+|---|---|
+| 0 running + 0 completed | `null` |
+| 1 running, 0 completed | 1 linha |
+| 1 running, N completed | 2 linhas |
+| 2+ running, 0 completed | 1 linha por agent running |
+| 2+ running, N completed | 1 linha por agent running + 1 linha summary |
+| 0 running, N completed | 1 linha (apenas summary) |
+
+O renderer retorna a string com `\n` embutidos; o orchestrator (`src/render/index.ts`) faz split antes de truncar, garantindo que cada linha entre na lógica de width independentemente.
 
 ### Por que mostrar agents?
 

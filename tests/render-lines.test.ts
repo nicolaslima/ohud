@@ -247,6 +247,66 @@ test("tools line null when toggle off", () => {
   expect(renderTools(ctx)).toBeNull();
 });
 
+test("tools line dedups N parallel running tools with same target — `Edit ×N: foo.ts`", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTools = true;
+  ctx.transcript.tools = [
+    { id: "1", name: "Edit", target: "foo.ts", status: "running", startTime: new Date() },
+    { id: "2", name: "Edit", target: "foo.ts", status: "running", startTime: new Date() },
+    { id: "3", name: "Edit", target: "foo.ts", status: "running", startTime: new Date() },
+  ];
+  const out = renderTools(ctx) ?? "";
+  expect(out).toContain("Edit ×3");
+  expect(out).toContain("foo.ts");
+  // Only one Edit running entry (not three).
+  const editMatches = out.match(/Edit/g) ?? [];
+  expect(editMatches.length).toBe(1);
+});
+
+test("tools line drops target when N parallel tools have different targets — `Edit ×N`", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTools = true;
+  ctx.transcript.tools = [
+    { id: "1", name: "Edit", target: "foo.ts", status: "running", startTime: new Date() },
+    { id: "2", name: "Edit", target: "bar.ts", status: "running", startTime: new Date() },
+  ];
+  const out = renderTools(ctx) ?? "";
+  expect(out).toContain("Edit ×2");
+  expect(out).not.toContain("foo.ts");
+  expect(out).not.toContain("bar.ts");
+});
+
+test("tools line keeps separate entries for distinct tool names", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTools = true;
+  ctx.transcript.tools = [
+    { id: "1", name: "Edit", target: "foo.ts", status: "running", startTime: new Date() },
+    { id: "2", name: "Read", target: "bar.ts", status: "running", startTime: new Date() },
+  ];
+  const out = renderTools(ctx) ?? "";
+  expect(out).toContain("Edit");
+  expect(out).toContain("Read");
+  expect(out).toContain("foo.ts");
+  expect(out).toContain("bar.ts");
+  expect(out).not.toContain("×");
+});
+
+test("tools line — single running, no target → just glyph + name", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTools = true;
+  ctx.transcript.tools = [
+    { id: "1", name: "Skill", status: "running", startTime: new Date() },
+  ];
+  const out = renderTools(ctx) ?? "";
+  expect(out).toContain("Skill");
+  expect(out).not.toContain("×");
+  expect(out).not.toContain(":");
+});
+
 test("agents line shows running agent", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
@@ -258,6 +318,58 @@ test("agents line shows running agent", () => {
   expect(out).toContain("explore");
   expect(out).toContain("haiku");
   expect(out).toContain("Finding auth code");
+  // Single running → single line (backward compat).
+  expect(out!.split("\n").length).toBe(1);
+});
+
+test("agents line — 2 running agents emit 2 lines", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showAgents = true;
+  ctx.transcript.agents = [
+    { id: "1", type: "explore", description: "A", status: "running", startTime: new Date() },
+    { id: "2", type: "review", description: "B", status: "running", startTime: new Date() },
+  ];
+  const out = renderAgents(ctx) ?? "";
+  const lines = out.split("\n");
+  expect(lines.length).toBe(2);
+  expect(lines[0]).toContain("explore");
+  expect(lines[0]).toContain("A");
+  expect(lines[1]).toContain("review");
+  expect(lines[1]).toContain("B");
+});
+
+test("agents line — 3 running + 2 completed → 3 running lines + 1 completed-summary line", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showAgents = true;
+  ctx.transcript.agents = [
+    { id: "1", type: "explore", status: "running", startTime: new Date() },
+    { id: "2", type: "review", status: "running", startTime: new Date() },
+    { id: "3", type: "debug", status: "running", startTime: new Date() },
+    { id: "4", type: "explore", status: "completed", startTime: new Date(), endTime: new Date() },
+    { id: "5", type: "explore", status: "completed", startTime: new Date(), endTime: new Date() },
+  ];
+  const out = renderAgents(ctx) ?? "";
+  const lines = out.split("\n");
+  expect(lines.length).toBe(4);
+  expect(lines[3]).toContain("explore ×2");
+});
+
+test("agents line — 0 running + 3 completed → single completed-summary line", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showAgents = true;
+  ctx.transcript.agents = [
+    { id: "1", type: "explore", status: "completed", startTime: new Date(), endTime: new Date() },
+    { id: "2", type: "explore", status: "completed", startTime: new Date(), endTime: new Date() },
+    { id: "3", type: "review", status: "completed", startTime: new Date(), endTime: new Date() },
+  ];
+  const out = renderAgents(ctx) ?? "";
+  const lines = out.split("\n");
+  expect(lines.length).toBe(1);
+  expect(out).toContain("explore ×2");
+  expect(out).toContain("review");
 });
 
 test("agents line null with no agents", () => {
@@ -508,6 +620,24 @@ test("render orchestrator falls back to anthropic mode", () => {
   const out = render(ctx);
   expect(out).toContain("Context");
   expect(out).toContain("Usage");
+});
+
+test("render orchestrator splits multi-line renderer output into separate lines", () => {
+  // Agents renderer returns "line1\nline2" when 2+ running agents — orchestrator
+  // must split on `\n` so each becomes an independent (truncatable) line.
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showAgents = true;
+  ctx.transcript.agents = [
+    { id: "1", type: "explore", description: "AAAA", status: "running", startTime: new Date() },
+    { id: "2", type: "review", description: "BBBB", status: "running", startTime: new Date() },
+  ];
+  const out = render(ctx);
+  const agentLines = out.split("\n").filter((l) => l.includes("explore") || l.includes("review"));
+  // explore and review must each be on their own line.
+  expect(agentLines.length).toBe(2);
+  expect(agentLines.some((l) => l.includes("explore") && !l.includes("review"))).toBe(true);
+  expect(agentLines.some((l) => l.includes("review") && !l.includes("explore"))).toBe(true);
 });
 
 test("render returns minimum line (model name) when all renderers null", () => {
