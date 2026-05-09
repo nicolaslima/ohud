@@ -17,6 +17,8 @@ import type { RenderContext } from "./types.js";
 const CONFIG_PATH = join(homedir(), ".claude/plugins/ohud/config.json");
 
 export async function main(): Promise<void> {
+  const T0 = process.hrtime.bigint();
+  const profile = process.env.OHUD_PROFILE === "1";
   try {
     const stdin = await readStdin();
     if (!stdin) {
@@ -59,6 +61,10 @@ export async function main(): Promise<void> {
     };
 
     const output = render(ctx);
+    if (profile) {
+      const elapsedMs = Number(process.hrtime.bigint() - T0) / 1_000_000;
+      process.stderr.write(`ohud-profile: total=${elapsedMs.toFixed(1)}ms\n`);
+    }
     if (output) console.log(output);
   } catch (err) {
     console.error("ohud: error", err instanceof Error ? err.message : String(err));
