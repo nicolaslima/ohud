@@ -1,6 +1,7 @@
 // src/index.ts
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { readStdin } from "./stdin.js";
 import { probeOllama } from "./ollama-probe.js";
 import { runDoctor } from "./doctor.js";
@@ -16,6 +17,9 @@ import { render } from "./render/index.js";
 import type { RenderContext } from "./types.js";
 
 const CONFIG_PATH = join(homedir(), ".claude/plugins/ohud/config.json");
+
+// Ensure log directory exists (idempotent, safe if already exists)
+mkdirSync(join(homedir(), ".claude/plugins/ohud"), { recursive: true });
 
 export async function main(): Promise<void> {
   const T0 = process.hrtime.bigint();
@@ -74,7 +78,18 @@ export async function main(): Promise<void> {
     }
     if (output) console.log(output);
   } catch (err) {
-    console.error("ohud: error", err instanceof Error ? err.message : String(err));
+    const msg = err instanceof Error ? err.message : String(err);
+    // Stdout sentinel — Claude Code displays this; stderr is discarded
+    console.log("\x1b[31mohud: error — see /ohud doctor or ~/.claude/plugins/ohud/last-errors.log\x1b[0m");
+    // Persist to log for /ohud doctor to surface
+    try {
+      const logPath = join(homedir(), ".claude/plugins/ohud/last-errors.log");
+      const stamp = new Date().toISOString();
+      const line = `[${stamp}] ${msg}\n`;
+      appendFileSync(logPath, line);
+    } catch { /* best-effort */ }
+    // Also stderr for terminal/CI capture
+    console.error("ohud: error", msg);
   }
 }
 
