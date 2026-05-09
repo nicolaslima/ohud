@@ -28,6 +28,22 @@ Use the Edit tool to merge the preset's flag mapping into `~/.claude/plugins/ohu
 
 ## Step 4: Preview against the most recent session
 
+Resolve runtime and plugin path from state.json (set by `/ohud setup`):
+
+```bash
+STATE="$HOME/.claude/plugins/ohud/state.json"
+if [ -f "$STATE" ]; then
+  RUNTIME=$(jq -r .runtime "$STATE")
+  PLUGIN_PATH=$(jq -r .pluginPath "$STATE")
+elif [ -n "$CLAUDE_PLUGIN_ROOT" ]; then
+  RUNTIME="node"
+  PLUGIN_PATH="$CLAUDE_PLUGIN_ROOT/dist/index.js"
+else
+  echo "Run /ohud setup first to detect runtime."
+  exit 1
+fi
+```
+
 Find the latest transcript:
 
 ```bash
@@ -39,7 +55,7 @@ Construct a real-shape stdin from the latest session and pipe to the bundle:
 
 ```bash
 echo '{"session_id":"preview","transcript_path":"'"$LATEST"'","model":{"id":"glm-5:cloud","display_name":"glm-5:cloud"},"workspace":{"current_dir":"'"$PWD"'"},"context_window":{"used_percentage":42}}' \
-  | node "$CLAUDE_PLUGIN_ROOT/dist/index.js"
+  | $RUNTIME $PLUGIN_PATH
 ```
 
 Show the rendered output to the user. The preview now reflects toggles that depend on transcript data (tools, todos, agents, prompt-cache) — not fake numbers.

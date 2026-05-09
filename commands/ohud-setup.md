@@ -64,3 +64,21 @@ echo '{"session_id":"setup","transcript_path":"/tmp/no","model":{"id":"glm-5:clo
 ```
 
 The user should see one or two lines without errors. Tell them to restart Claude Code.
+
+## Step 6: Persist state for /ohud configure
+
+Write `~/.claude/plugins/ohud/state.json`:
+
+```bash
+mkdir -p "$HOME/.claude/plugins/ohud"
+cat > "$HOME/.claude/plugins/ohud/state.json" <<EOF
+{
+  "runtime": "$RUNTIME",
+  "pluginPath": "$PLUGIN_PATH",
+  "command": "$COMMAND",
+  "setupAt": "$(date -Iseconds)"
+}
+EOF
+```
+
+This lets `/ohud configure` reuse runtime detection without re-prompting.
