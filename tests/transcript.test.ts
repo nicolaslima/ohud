@@ -30,3 +30,13 @@ test("returns empty data for nonexistent file", async () => {
   expect(t.tools).toHaveLength(0);
   expect(t.todos).toHaveLength(0);
 });
+
+test("parseTranscript skips re-parse when stat is unchanged", async () => {
+  const fixture = join(import.meta.dir, "fixtures/transcript-anthropic.jsonl");
+  const t1 = await parseTranscript(fixture);
+  const start = performance.now();
+  const t2 = await parseTranscript(fixture);
+  const elapsed = performance.now() - start;
+  expect(elapsed).toBeLessThan(2); // cache hit should be ≤2ms
+  expect(t2.tools).toEqual(t1.tools);
+});

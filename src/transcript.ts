@@ -1,14 +1,30 @@
 // src/transcript.ts
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import type { AgentEntry, SessionTokens, TodoItem, ToolEntry, TranscriptData } from "./types.js";
 
+interface CacheEntry { size: number; mtimeMs: number; data: TranscriptData; }
+const cache = new Map<string, CacheEntry>();
+
 export async function parseTranscript(path: string): Promise<TranscriptData> {
-  const empty: TranscriptData = { tools: [], agents: [], todos: [] };
-  if (!path) return empty;
-
+  if (!path) return empty();
+  let st;
+  try { st = await stat(path); } catch { return empty(); }
+  const cached = cache.get(path);
+  if (cached && cached.size === st.size && cached.mtimeMs === st.mtimeMs) {
+    return cached.data;
+  }
   let raw: string;
-  try { raw = await readFile(path, "utf8"); } catch { return empty; }
+  try { raw = await readFile(path, "utf8"); } catch { return empty(); }
+  const data = parseRaw(raw);
+  cache.set(path, { size: st.size, mtimeMs: st.mtimeMs, data });
+  return data;
+}
 
+function empty(): TranscriptData {
+  return { tools: [], agents: [], todos: [] };
+}
+
+function parseRaw(raw: string): TranscriptData {
   const lines = raw.split("\n").filter((l) => l.length > 0);
 
   const tools = new Map<string, ToolEntry>();
