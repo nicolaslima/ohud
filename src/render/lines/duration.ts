@@ -29,11 +29,6 @@ function formatHms(ms: number): string {
   return m > 0 ? `${m}m` : `${s}s`;
 }
 
-function computeTokensPerSecond(ctx: RenderContext): number | null {
-  const eval_count = ctx.transcript.totalEvalCount;
-  const eval_dur_ns = ctx.transcript.totalEvalDurationNs;
-  if (typeof eval_count === "number" && typeof eval_dur_ns === "number" && eval_dur_ns > 0) {
-    return (eval_count * 1_000_000_000) / eval_dur_ns;
-  }
+function computeTokensPerSecond(_ctx: RenderContext): number | null {
   return null;
 }

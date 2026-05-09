@@ -25,12 +25,6 @@ test("extracts the latest TodoWrite snapshot", async () => {
   expect(t.todos[0].status).toBe("in_progress");
 });
 
-test("sums Ollama total_duration when present", async () => {
-  const t = await parseTranscript(fx("transcript-ollama-with-duration.jsonl"));
-  expect(t.totalDurationNs).toBe(12_000_000_000);
-  expect(t.totalEvalCount).toBe(10);
-});
-
 test("returns empty data for nonexistent file", async () => {
   const t = await parseTranscript("/nonexistent/path.jsonl");
   expect(t.tools).toHaveLength(0);

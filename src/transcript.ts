@@ -17,10 +17,6 @@ export async function parseTranscript(path: string): Promise<TranscriptData> {
   const tokens: SessionTokens = {
     inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0,
   };
-  let totalDurationNs = 0;
-  let totalEvalCount = 0;
-  let totalEvalDurationNs = 0;
-  let sawOllamaTiming = false;
   let sessionStart: Date | undefined;
   let lastAssistantResponseAt: Date | undefined;
   let sessionName: string | undefined;
@@ -48,14 +44,6 @@ export async function parseTranscript(path: string): Promise<TranscriptData> {
       tokens.cacheCreationTokens += Number(message.usage.cache_creation_input_tokens ?? 0);
       tokens.cacheReadTokens += Number(message.usage.cache_read_input_tokens ?? 0);
       if (ts) lastAssistantResponseAt = ts;
-
-      // Look for Ollama-native timing fields anywhere in this entry.
-      // In real Claude Code → Ollama Cloud sessions, these never appear (verified 2026-05-08),
-      // but keeping the walker preserves forward-compat if Ollama propagates timing in the future.
-      const found = findOllamaTiming(entry);
-      if (found.total_duration) { totalDurationNs += found.total_duration; sawOllamaTiming = true; }
-      if (found.eval_count) totalEvalCount += found.eval_count;
-      if (found.eval_duration) totalEvalDurationNs += found.eval_duration;
     }
 
     if (Array.isArray(message.content)) {
@@ -89,7 +77,7 @@ export async function parseTranscript(path: string): Promise<TranscriptData> {
     }
   }
 
-  const result: TranscriptData = {
+  return {
     tools: [...tools.values()],
     agents: [...agents.values()],
     todos: latestTodos,
@@ -98,12 +86,6 @@ export async function parseTranscript(path: string): Promise<TranscriptData> {
     lastAssistantResponseAt,
     sessionTokens: tokens.inputTokens + tokens.outputTokens > 0 ? tokens : undefined,
   };
-  if (sawOllamaTiming) {
-    result.totalDurationNs = totalDurationNs;
-    result.totalEvalCount = totalEvalCount;
-    result.totalEvalDurationNs = totalEvalDurationNs;
-  }
-  return result;
 }
 
 function extractTarget(input: unknown): string | undefined {
@@ -114,32 +96,4 @@ function extractTarget(input: unknown): string | undefined {
   if (typeof i.command === "string") return i.command;
   if (typeof i.pattern === "string") return i.pattern;
   return undefined;
-}
-
-interface OllamaTiming {
-  total_duration?: number;
-  eval_count?: number;
-  eval_duration?: number;
-}
-
-function findOllamaTiming(obj: unknown, depth = 0): OllamaTiming {
-  if (depth > 6 || obj == null || typeof obj !== "object") return {};
-  if (Array.isArray(obj)) {
-    return obj.reduce<OllamaTiming>((acc, v) => mergeTiming(acc, findOllamaTiming(v, depth + 1)), {});
-  }
-  const o = obj as Record<string, unknown>;
-  let acc: OllamaTiming = {};
-  if (typeof o.total_duration === "number") acc.total_duration = o.total_duration;
-  if (typeof o.eval_count === "number") acc.eval_count = o.eval_count;
-  if (typeof o.eval_duration === "number") acc.eval_duration = o.eval_duration;
-  for (const v of Object.values(o)) acc = mergeTiming(acc, findOllamaTiming(v, depth + 1));
-  return acc;
-}
-
-function mergeTiming(a: OllamaTiming, b: OllamaTiming): OllamaTiming {
-  return {
-    total_duration: a.total_duration ?? b.total_duration,
-    eval_count: a.eval_count ?? b.eval_count,
-    eval_duration: a.eval_duration ?? b.eval_duration,
-  };
 }

@@ -139,12 +139,6 @@ export interface TranscriptData {
   sessionName?: string;
   lastAssistantResponseAt?: Date;
   sessionTokens?: SessionTokens;
-  // Ollama-mode aggregated GPU time, in nanoseconds. Undefined if no Ollama
-  // duration fields were observed in the transcript.
-  totalDurationNs?: number;
-  // Ollama eval counts (for tok/s line)
-  totalEvalCount?: number;
-  totalEvalDurationNs?: number;
 }
 
 // === Usage (Anthropic mode) ===

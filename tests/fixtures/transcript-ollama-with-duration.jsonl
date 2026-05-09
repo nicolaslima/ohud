@@ -1,2 +1,0 @@
-{"type":"user","message":{"role":"user","content":"hi"},"uuid":"u1","timestamp":"2026-05-08T10:00:00.000Z","sessionId":"s3"}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello"}],"usage":{"input_tokens":50,"output_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}},"ollama":{"total_duration":12000000000,"eval_count":10,"eval_duration":2000000000},"uuid":"a1","timestamp":"2026-05-08T10:00:01.000Z","sessionId":"s3"}

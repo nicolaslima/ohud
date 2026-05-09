@@ -58,22 +58,21 @@ test("context line — empty when used_percentage missing", () => {
   expect(out).toBeNull();
 });
 
-test("api-time line in ollama mode with totalDurationNs", () => {
-  const stdin = fx("stdin-ollama-cloud.json");
-  const ctx = makeCtx(stdin, "ollama");
-  ctx.transcript.totalDurationNs = 12 * 60 * 1_000_000_000 + 30 * 1_000_000_000;
-  const out = renderApiTime(ctx);
-  expect(out).toContain("GPU");
-  expect(out).toContain("12m 30s");
-});
-
-test("api-time line falls back to API time when transcript empty", () => {
+test("api-time line in ollama mode uses total_api_duration_ms", () => {
   const stdin = fx("stdin-ollama-cloud.json");
   const ctx = makeCtx(stdin, "ollama");
   ctx.stdin.cost = { total_api_duration_ms: 75_000 };
   const out = renderApiTime(ctx);
   expect(out).toContain("API");
+  expect(out).toContain("⏱");
   expect(out).toContain("1m 15s");
+});
+
+test("api-time line returns null when no API duration available", () => {
+  const stdin = fx("stdin-ollama-cloud.json");
+  const ctx = makeCtx(stdin, "ollama");
+  ctx.stdin.cost = {};
+  expect(renderApiTime(ctx)).toBeNull();
 });
 
 test("api-time line null in anthropic mode", () => {
@@ -330,11 +329,11 @@ import { render } from "../src/render/index.js";
 test("render orchestrator emits multi-line output for ollama mode", () => {
   const stdin = fx("stdin-ollama-cloud.json");
   const ctx = makeCtx(stdin, "ollama");
-  ctx.transcript.totalDurationNs = 120_000_000_000;
+  ctx.stdin.cost = { total_api_duration_ms: 120_000 };
   const out = render(ctx);
   expect(out.split("\n").length).toBeGreaterThanOrEqual(2);
   expect(out).toContain("Context");
-  expect(out).toContain("GPU");
+  expect(out).toContain("API");
 });
 
 test("render orchestrator falls back to anthropic mode", () => {

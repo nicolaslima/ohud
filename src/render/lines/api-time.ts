@@ -7,11 +7,6 @@ export function renderApiTime(ctx: RenderContext): string | null {
   if (!ctx.config.display.showApiTime) return null;
   const c = ctx.config.colors;
 
-  const ns = ctx.transcript.totalDurationNs;
-  if (typeof ns === "number" && ns > 0) {
-    return `${color(c.label, "GPU")} ${color(c.apiTime, `⏱ ${formatDuration(ns / 1_000_000)}`)}`;
-  }
-
   const apiMs = ctx.stdin.cost?.total_api_duration_ms;
   if (typeof apiMs === "number" && apiMs > 0) {
     return `${color(c.label, "API")} ${color(c.apiTime, `⏱ ${formatDuration(apiMs)}`)}`;
