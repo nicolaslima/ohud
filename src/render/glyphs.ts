@@ -88,17 +88,18 @@ type IconVariant = "anthropic" | "ollama";
 
 const ICON_UNICODE: Record<IconVariant, string> = {
   anthropic: "✱",   // U+2731 EIGHT SPOKED ASTERISK
-  ollama:    "🦙",  // U+1F999 LLAMA
+  ollama:    "◆",   // U+25C6 BLACK DIAMOND (width-1, distinct from anthropic's asterisk)
 };
 
 // nf-fa-asterisk (U+F069) for anthropic; ollama has no Nerd Font glyph → falls back.
 const ICON_NERD: Partial<Record<IconVariant, string>> = {
   anthropic: "",   // nf-fa-asterisk U+F069
+  ollama:    "",   // nf-fae-llama U+E27B
 };
 
 const ICON_ASCII: Record<IconVariant, string> = {
   anthropic: "*",
-  ollama:    "L",
+  ollama:    "o",
 };
 
 /**

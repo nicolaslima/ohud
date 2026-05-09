@@ -1099,13 +1099,13 @@ describe("prose sentence — anthropic icon", () => {
 });
 
 describe("prose sentence — ollama icon", () => {
-  test("sentence starts with 🦙 icon when mode=ollama", () => {
+  test("sentence starts with ◆ icon when mode=ollama", () => {
     const ctx = makeCtx();
     (ctx as unknown as Record<string, unknown>).mode = "ollama";
     const cells = collectCells([projectWidget, contextWidget], ctx);
     const [line] = hushLayout.pack(cells, 200, ctx.config);
-    // 🦙 is a 2-wide emoji
-    expect(line!.startsWith("🦙")).toBe(true);
+    // ◆ is a 2-wide emoji
+    expect(line!.startsWith("◆")).toBe(true);
   });
 });
 
@@ -1567,7 +1567,7 @@ describe("prose sentence — cache cell omitted on Ollama-style payload (no cach
     expect(plain).not.toContain("cache");
   });
 
-  test("ollama sentence uses 🦙 icon and shows kimi model label", () => {
+  test("ollama sentence uses ◆ icon and shows kimi model label", () => {
     const ctx = makeCtx({
       stdin: {
         model: { id: "kimi-k2-6-262k" },
@@ -1577,7 +1577,7 @@ describe("prose sentence — cache cell omitted on Ollama-style payload (no cach
     (ctx as unknown as Record<string, unknown>).mode = "ollama";
     const cells = collectCells([projectWidget, contextWidget], ctx);
     const [line] = hushLayout.pack(cells, 200, ctx.config);
-    expect(line!.startsWith("🦙")).toBe(true);
+    expect(line!.startsWith("◆")).toBe(true);
     const plain = stripAnsi(line!);
     expect(plain).toContain("Kimi K2.6 (262K)");
   });

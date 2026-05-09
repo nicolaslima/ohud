@@ -13,8 +13,8 @@
 // Rationale: threshold of 3 chosen to distinguish isolated failures (a single
 // bad Bash invocation) from a pattern of repeated errors across different tools.
 
-import type { HushCell } from "../widget.js";
-import type { ParsedTranscript } from "../../types.js";
+import type { Widget, WidgetCell, HushCell } from "../widget.js";
+import type { ParsedTranscript, RenderContext } from "../../types.js";
 
 /**
  * Returns a HushCell showing the count of tool errors in the transcript,
@@ -37,6 +37,23 @@ export function renderErrorCountCell(
     text: `errors ${count}`,
     attention,
     group: "metrics",
-    priority: 35, // highest among metrics — survives truncation longest
+    priority: 35,
   };
 }
+
+export const errorsWidget: Widget = {
+  id: "errors",
+  group: "metrics",
+  priority: 35,
+  minWidth: 10,
+
+  render(ctx: RenderContext): WidgetCell | null {
+    const cell = renderErrorCountCell(ctx.transcript as ParsedTranscript);
+    if (cell == null) return null;
+    return { body: cell.text, visualWidth: cell.text.length };
+  },
+
+  renderHush(ctx: RenderContext): HushCell | null {
+    return renderErrorCountCell(ctx.transcript as ParsedTranscript);
+  },
+};

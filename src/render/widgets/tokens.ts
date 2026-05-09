@@ -5,8 +5,8 @@
 //
 // Priority 20 — lowest among metrics cells; drops first under width pressure.
 
-import type { HushCell } from "../widget.js";
-import type { ParsedTranscript } from "../../types.js";
+import type { Widget, WidgetCell, HushCell } from "../widget.js";
+import type { ParsedTranscript, RenderContext } from "../../types.js";
 import { computeTokensPerSecond } from "../../transcript.js";
 
 /**
@@ -28,6 +28,23 @@ export function renderTokensPerSecCell(
     text: `${tps} tks/s`,
     attention: "muted",
     group: "metrics",
-    priority: 20, // lowest priority — first to drop under width pressure
+    priority: 20,
   };
 }
+
+export const tokensPerSecWidget: Widget = {
+  id: "tokensPerSec",
+  group: "metrics",
+  priority: 20,
+  minWidth: 10,
+
+  render(ctx: RenderContext): WidgetCell | null {
+    const cell = renderTokensPerSecCell(ctx.transcript as ParsedTranscript);
+    if (cell == null) return null;
+    return { body: cell.text, visualWidth: cell.text.length };
+  },
+
+  renderHush(ctx: RenderContext): HushCell | null {
+    return renderTokensPerSecCell(ctx.transcript as ParsedTranscript);
+  },
+};

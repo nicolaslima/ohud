@@ -353,14 +353,15 @@ function glyph(key, mode) {
 }
 var ICON_UNICODE = {
   anthropic: "✱",
-  ollama: "\uD83E\uDD99"
+  ollama: "◆"
 };
 var ICON_NERD = {
-  anthropic: ""
+  anthropic: "",
+  ollama: ""
 };
 var ICON_ASCII = {
   anthropic: "*",
-  ollama: "L"
+  ollama: "o"
 };
 function iconForMode(mode, glyphMode, override = "auto") {
   let variant;
@@ -681,7 +682,14 @@ function condenseModelId(nameOrId) {
 var DEFAULT_CONTEXT = {
   opus: "1M",
   sonnet: "200K",
-  haiku: "200K"
+  haiku: "200K",
+  kimi: "1M",
+  qwen3: "256K",
+  glm: "128K",
+  gpt: "128K",
+  deepseek: "128K",
+  llama: "128K",
+  mistral: "128K"
 };
 function formatModelLabel(nameOrId) {
   let s = nameOrId.trim();
@@ -689,6 +697,7 @@ function formatModelLabel(nameOrId) {
     return s;
   if (s.toLowerCase().startsWith("claude-"))
     s = s.slice(7);
+  s = s.replace(/:[a-zA-Z0-9_-]+$/, "");
   s = s.replace(/-\d{8}$/, "");
   let contextLabel = null;
   const ctxMatch = /^(.*)-(\d+[kKmM])$/.exec(s);
@@ -1548,6 +1557,16 @@ function parseRaw(raw) {
     sessionTokens: tokens.inputTokens + tokens.outputTokens > 0 ? tokens : undefined
   };
 }
+function computeTokensPerSecond(transcript) {
+  const msgs = transcript.assistantMessages;
+  if (msgs.length < 2)
+    return null;
+  const elapsedMs = msgs[msgs.length - 1].timestamp.getTime() - msgs[0].timestamp.getTime();
+  if (elapsedMs < 1000)
+    return null;
+  const totalTokens = msgs.reduce((sum, m) => sum + m.outputTokens, 0);
+  return Math.round(totalTokens / (elapsedMs / 1000));
+}
 function extractTarget(input) {
   if (typeof input !== "object" || input === null)
     return;
@@ -1809,22 +1828,13 @@ var contextWidget = {
     const warn = ctx.config.display.hush?.thresholds?.warning ?? ctx.config.display.warningThreshold;
     const crit = ctx.config.display.hush?.thresholds?.danger ?? ctx.config.display.criticalThreshold;
     const attention = rounded >= crit ? "danger" : rounded >= warn ? "warning" : "muted";
-    const cwSize = ctx.stdin.context_window?.context_window_size;
-    const capacitySuffix = cwSize && cwSize > 200000 ? ` of ${formatCapacity(cwSize)}` : "";
     return {
       group: "metrics",
-      text: `${rounded}%${capacitySuffix}`,
+      text: `${rounded}%`,
       attention
     };
   }
 };
-function formatCapacity(size) {
-  const millions = size / 1e6;
-  if (millions >= 0.95)
-    return `${Math.round(millions)}M`;
-  const hundreds = Math.round(size / 1e5) * 100;
-  return `${hundreds}k`;
-}
 var BAR_WIDTH = 10;
 function renderContext(ctx) {
   if (!ctx.config.display.showContextBar)
@@ -2214,7 +2224,7 @@ function renderDuration(ctx) {
       parts.push(`⏱ ${formatHms(ms)}`);
   }
   if (showSpeed) {
-    const tps = computeTokensPerSecond(ctx);
+    const tps = computeTokensPerSecond2(ctx);
     if (tps !== null)
       parts.push(`out: ${tps.toFixed(1)} tok/s`);
   }
@@ -2228,7 +2238,7 @@ function formatHms(ms) {
   const s = total % 60;
   return m > 0 ? `${m}m` : `${s}s`;
 }
-function computeTokensPerSecond(_ctx) {
+function computeTokensPerSecond2(_ctx) {
   return null;
 }
 
@@ -2610,6 +2620,113 @@ function readRules(startDir) {
   }
 }
 
+// src/render/widgets/session.ts
+function formatElapsed2(totalSeconds) {
+  const s = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const m = totalMinutes % 60;
+  const h = Math.floor(totalMinutes / 60);
+  const ss = String(s).padStart(2, "0");
+  if (h > 0) {
+    const mm = String(m).padStart(2, "0");
+    return `${h}:${mm}:${ss}`;
+  }
+  return `${m}:${ss}`;
+}
+function renderSessionTimeCell(transcript, now) {
+  if (transcript == null)
+    return null;
+  const sessionStart = transcript.sessionStart;
+  if (sessionStart == null)
+    return null;
+  const elapsedMs = now - sessionStart.getTime();
+  const elapsedSec = Math.max(0, Math.floor(elapsedMs / 1000));
+  return {
+    primaryText: "session time",
+    secondaryText: formatElapsed2(elapsedSec),
+    text: `session time ${formatElapsed2(elapsedSec)}`,
+    attention: "muted",
+    group: "metrics",
+    priority: 30
+  };
+}
+var sessionTimeWidget = {
+  id: "sessionTime",
+  group: "metrics",
+  priority: 30,
+  minWidth: 16,
+  render(ctx) {
+    const cell = renderSessionTimeCell(ctx.transcript, Date.now());
+    if (cell == null)
+      return null;
+    return { body: cell.text, visualWidth: cell.text.length };
+  },
+  renderHush(ctx) {
+    return renderSessionTimeCell(ctx.transcript, Date.now());
+  }
+};
+
+// src/render/widgets/tokens.ts
+function renderTokensPerSecCell(transcript) {
+  if (transcript == null)
+    return null;
+  const tps = computeTokensPerSecond(transcript);
+  if (tps == null)
+    return null;
+  return {
+    text: `${tps} tks/s`,
+    attention: "muted",
+    group: "metrics",
+    priority: 20
+  };
+}
+var tokensPerSecWidget = {
+  id: "tokensPerSec",
+  group: "metrics",
+  priority: 20,
+  minWidth: 10,
+  render(ctx) {
+    const cell = renderTokensPerSecCell(ctx.transcript);
+    if (cell == null)
+      return null;
+    return { body: cell.text, visualWidth: cell.text.length };
+  },
+  renderHush(ctx) {
+    return renderTokensPerSecCell(ctx.transcript);
+  }
+};
+
+// src/render/widgets/errors.ts
+function renderErrorCountCell(transcript) {
+  if (transcript == null)
+    return null;
+  const count = transcript.tools.filter((t) => t.hasError === true).length;
+  if (count === 0)
+    return null;
+  const attention = count >= 3 ? "danger" : "warning";
+  return {
+    text: `errors ${count}`,
+    attention,
+    group: "metrics",
+    priority: 35
+  };
+}
+var errorsWidget = {
+  id: "errors",
+  group: "metrics",
+  priority: 35,
+  minWidth: 10,
+  render(ctx) {
+    const cell = renderErrorCountCell(ctx.transcript);
+    if (cell == null)
+      return null;
+    return { body: cell.text, visualWidth: cell.text.length };
+  },
+  renderHush(ctx) {
+    return renderErrorCountCell(ctx.transcript);
+  }
+};
+
 // src/render/widgets/index.ts
 var WIDGETS = [
   projectWidget,
@@ -2620,6 +2737,9 @@ var WIDGETS = [
   promptCacheWidget,
   memoryWidget,
   durationWidget,
+  errorsWidget,
+  sessionTimeWidget,
+  tokensPerSecWidget,
   toolsWidget,
   agentsWidget,
   todosWidget,
@@ -2647,6 +2767,10 @@ function isVisible(w, config) {
       return d.showMemoryUsage === true;
     case "duration":
       return d.showDuration === true || d.showSpeed === true;
+    case "sessionTime":
+    case "tokensPerSec":
+    case "errors":
+      return config.lineLayout === "compact";
     case "tools":
       return d.showTools === true;
     case "agents":

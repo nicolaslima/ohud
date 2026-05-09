@@ -13,6 +13,9 @@ import { toolsWidget } from "./tools.js";
 import { agentsWidget } from "./agents.js";
 import { todosWidget } from "./todos.js";
 import { environmentWidget } from "./environment.js";
+import { sessionTimeWidget } from "./session.js";
+import { tokensPerSecWidget } from "./tokens.js";
+import { errorsWidget } from "./errors.js";
 
 /**
  * All 12 registered widgets, in priority-descending order.
@@ -28,6 +31,9 @@ export const WIDGETS: readonly Widget[] = [
   promptCacheWidget,// metrics,  priority 60
   memoryWidget,     // metrics,  priority 50
   durationWidget,   // metrics,  priority 40
+  errorsWidget,     // metrics,  priority 35 (Hush prose only)
+  sessionTimeWidget,// metrics,  priority 30 (Hush prose only)
+  tokensPerSecWidget,// metrics, priority 20 (Hush prose only)
   toolsWidget,      // activity, priority 90
   agentsWidget,     // activity, priority 85
   todosWidget,      // activity, priority 70
@@ -87,6 +93,13 @@ function isVisible(w: Widget, config: HudConfig): boolean {
     case "duration":
       // renderDuration gates on showDuration OR showSpeed
       return d.showDuration === true || d.showSpeed === true;
+
+    case "sessionTime":
+    case "tokensPerSec":
+    case "errors":
+      // Hush-prose-only widgets: only the new prose layout consumes their cells.
+      // RowLayout has no slot for them, so gate on lineLayout to avoid noise.
+      return config.lineLayout === "compact";
 
     // --- activity ---
     case "tools":

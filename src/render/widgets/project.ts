@@ -22,7 +22,7 @@ export const projectWidget: Widget = {
     const cells: HushCell[] = [];
 
     // --- Sub-cell 0: brand icon (full intensity — no dim, no link) ---
-    // The icon identifies the session backend (✱ for Anthropic, 🦙 for Ollama).
+    // The icon identifies the session backend (✱ for Anthropic, ◆ for Ollama).
     const iconText = iconForMode(ctx.mode, ctx.config.display.glyphs);
     if (iconText) {
       cells.push({
@@ -179,9 +179,18 @@ export function condenseModelId(nameOrId: string): string {
 // Keys are matched against the lowercased first word segment of the name after
 // stripping the "claude-" prefix.
 const DEFAULT_CONTEXT: Record<string, string> = {
+  // Anthropic
   opus:   "1M",
   sonnet: "200K",
   haiku:  "200K",
+  // Ollama Cloud — context windows from the published model cards.
+  kimi:    "1M",
+  qwen3:   "256K",
+  glm:     "128K",
+  gpt:     "128K",
+  deepseek:"128K",
+  llama:   "128K",
+  mistral: "128K",
 };
 
 /**
@@ -201,6 +210,11 @@ export function formatModelLabel(nameOrId: string): string {
 
   // Step 1: Strip leading "claude-" prefix (case-insensitive).
   if (s.toLowerCase().startsWith("claude-")) s = s.slice(7);
+
+  // Step 1b: Strip Ollama-style tag suffix (":cloud", ":dev", ":latest", etc.)
+  // Ollama model ids are typically "<family>-<version>:<tag>". The tag is a
+  // deployment label, not part of the model identity for display purposes.
+  s = s.replace(/:[a-zA-Z0-9_-]+$/, "");
 
   // Step 2: Strip trailing date-stamps like -20251001 (8 consecutive digits).
   s = s.replace(/-\d{8}$/, "");

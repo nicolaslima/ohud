@@ -7,8 +7,8 @@
 // Priority 30 — shown in metrics group; lower priority than errors (35) so
 // errors survive truncation while session time may drop first.
 
-import type { HushCell } from "../widget.js";
-import type { ParsedTranscript } from "../../types.js";
+import type { Widget, WidgetCell, HushCell } from "../widget.js";
+import type { ParsedTranscript, RenderContext } from "../../types.js";
 
 /**
  * Format elapsed seconds as H:MM:SS (≥ 1h) or M:SS (< 1h).
@@ -54,14 +54,28 @@ export function renderSessionTimeCell(
   const elapsedSec = Math.max(0, Math.floor(elapsedMs / 1000));
 
   return {
-    // primaryText/secondaryText lets HushLayout style them separately:
-    // primaryText → baseColor (none here — just dim via muted attention)
-    // secondaryText → dim
     primaryText: "session time",
     secondaryText: formatElapsed(elapsedSec),
     text: `session time ${formatElapsed(elapsedSec)}`,
     attention: "muted",
     group: "metrics",
-    priority: 30, // below errors (35), above tokens (20)
+    priority: 30,
   };
 }
+
+export const sessionTimeWidget: Widget = {
+  id: "sessionTime",
+  group: "metrics",
+  priority: 30,
+  minWidth: 16,
+
+  render(ctx: RenderContext): WidgetCell | null {
+    const cell = renderSessionTimeCell(ctx.transcript as ParsedTranscript, Date.now());
+    if (cell == null) return null;
+    return { body: cell.text, visualWidth: cell.text.length };
+  },
+
+  renderHush(ctx: RenderContext): HushCell | null {
+    return renderSessionTimeCell(ctx.transcript as ParsedTranscript, Date.now());
+  },
+};

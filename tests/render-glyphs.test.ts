@@ -63,8 +63,8 @@ test("iconForMode: auto + anthropic mode → ✱ in unicode tier", () => {
   expect(iconForMode("anthropic", "unicode")).toBe("✱");
 });
 
-test("iconForMode: auto + ollama mode → 🦙 in unicode tier", () => {
-  expect(iconForMode("ollama", "unicode")).toBe("🦙");
+test("iconForMode: auto + ollama mode → ◆ in unicode tier", () => {
+  expect(iconForMode("ollama", "unicode")).toBe("◆");
 });
 
 test("iconForMode: auto + unknown mode → empty string", () => {
@@ -82,12 +82,12 @@ test("iconForMode: override 'none' → empty regardless of mode", () => {
 
 test("iconForMode: ascii tier → returns ASCII variants", () => {
   expect(iconForMode("anthropic", "ascii")).toBe("*");
-  expect(iconForMode("ollama", "ascii")).toBe("L");
+  expect(iconForMode("ollama", "ascii")).toBe("o");
 });
 
 test("iconForMode: nerd tier → nerd glyph for anthropic, falls through to unicode for ollama (no nerd glyph for llama)", () => {
   // Anthropic has a nerd glyph (nf-fa-asterisk)
   expect(iconForMode("anthropic", "nerd")).toBe("");   // U+F069 nf-fa-asterisk
-  // Ollama has no nerd glyph → falls back to 🦙 (unicode)
-  expect(iconForMode("ollama", "nerd")).toBe("🦙");
+  // Ollama has nerd glyph nf-fae-llama (U+E27B)
+  expect(iconForMode("ollama", "nerd")).toBe("");
 });

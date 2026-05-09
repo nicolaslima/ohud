@@ -4,8 +4,8 @@ import { WIDGETS, visibleWidgets } from "../src/render/widgets/index.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 
 describe("widget registry invariants", () => {
-  test("exactly 12 widgets are registered", () => {
-    expect(WIDGETS.length).toBe(12);
+  test("exactly 15 widgets are registered", () => {
+    expect(WIDGETS.length).toBe(15);
   });
 
   test("all widget IDs are unique", () => {
@@ -54,6 +54,7 @@ describe("widget registry invariants", () => {
     const expectedIds = [
       "project", "context", "apiTime", "usage", "cost", "promptCache",
       "memory", "duration", "tools", "agents", "todos", "environment",
+      "errors", "sessionTime", "tokensPerSec",
     ];
     for (const id of expectedIds) {
       expect(ids.has(id)).toBe(true);

@@ -34,14 +34,13 @@ export const contextWidget: Widget = {
       rounded >= warn ? "warning" :
       "muted";
 
-    const cwSize = ctx.stdin.context_window?.context_window_size;
-    const capacitySuffix = cwSize && cwSize > 200_000
-      ? ` of ${formatCapacity(cwSize)}`
-      : "";
+    // No `of <size>` capacity suffix here — the model widget already prints
+    // the context window in parens (e.g. "Opus 4.7 (1M)"), so repeating it
+    // in the context cell ("with context X% of 1M used") would be redundant.
 
     return {
       group: "metrics",
-      text: `${rounded}%${capacitySuffix}`,
+      text: `${rounded}%`,
       attention,
     };
   },

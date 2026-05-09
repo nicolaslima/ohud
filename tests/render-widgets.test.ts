@@ -692,31 +692,22 @@ test("project renderHush — model formats with context suffix: claude-opus-4-7-
   expect(modelCell?.text).toBe("Opus 4.7 (1M)");
 });
 
-test("context renderHush — appends capacity when context_window_size > 200k", () => {
+test("context renderHush — emits bare percentage (capacity is implied by the model label in the prose layout)", () => {
   const stdin: StdinData = {
     context_window: { used_percentage: 39, context_window_size: 1_000_000 },
   };
   const ctx = makeCtx(stdin, "anthropic");
   const cell = contextWidget.renderHush!(ctx) as HushCell | null;
-  expect(cell?.text).toBe("39% of 1M");
+  expect(cell?.text).toBe("39%");
 });
 
-test("context renderHush — no capacity suffix when context_window_size ≤ 200k", () => {
+test("context renderHush — bare percentage at small context window too", () => {
   const stdin: StdinData = {
     context_window: { used_percentage: 45, context_window_size: 200_000 },
   };
   const ctx = makeCtx(stdin, "anthropic");
   const cell = contextWidget.renderHush!(ctx) as HushCell | null;
   expect(cell?.text).toBe("45%");
-});
-
-test("context renderHush — 500k rounds to 500k", () => {
-  const stdin: StdinData = {
-    context_window: { used_percentage: 20, context_window_size: 500_000 },
-  };
-  const ctx = makeCtx(stdin, "anthropic");
-  const cell = contextWidget.renderHush!(ctx) as HushCell | null;
-  expect(cell?.text).toBe("20% of 500k");
 });
 
 test("usage renderHush — new format rate 79%/5h", () => {
