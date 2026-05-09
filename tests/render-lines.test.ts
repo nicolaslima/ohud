@@ -45,6 +45,71 @@ test("project line — anthropic mode", () => {
   expect(out).toContain("ohud");
 });
 
+test("project line prefers project_dir basename over current_dir worktree slice", () => {
+  const stdin: StdinData = {
+    model: { id: "x", display_name: "x" },
+    workspace: {
+      project_dir: "/Users/me/code/claude-code",
+      current_dir: "/Users/me/code/claude-code/.worktrees/release+setup-plugin-structure",
+    },
+  };
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.gitStatus = null;
+  const out = renderProject(ctx);
+  expect(out).toContain("claude-code");
+  expect(out).not.toContain("release+setup-plugin-structure");
+  expect(out).not.toContain(".worktrees");
+});
+
+test("project line falls back to current_dir basename when project_dir absent (pathLevels=1)", () => {
+  const stdin: StdinData = {
+    model: { id: "x", display_name: "x" },
+    workspace: { current_dir: "/foo/bar/baz" },
+  };
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.gitStatus = null;
+  ctx.config.pathLevels = 1;
+  const out = renderProject(ctx);
+  expect(out).toContain("baz");
+  expect(out).not.toContain("bar/baz");
+});
+
+test("project line falls back to current_dir when project_dir is empty string", () => {
+  const stdin: StdinData = {
+    model: { id: "x", display_name: "x" },
+    workspace: { project_dir: "", current_dir: "/foo/bar/baz" },
+  };
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.gitStatus = null;
+  ctx.config.pathLevels = 1;
+  const out = renderProject(ctx);
+  expect(out).toContain("baz");
+});
+
+test("project line falls back to current_dir when project_dir is just root", () => {
+  const stdin: StdinData = {
+    model: { id: "x", display_name: "x" },
+    workspace: { project_dir: "/", current_dir: "/foo/bar/baz" },
+  };
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.gitStatus = null;
+  ctx.config.pathLevels = 1;
+  const out = renderProject(ctx);
+  expect(out).toContain("baz");
+});
+
+test("project line — pathLevels=2 still applies in current_dir fallback", () => {
+  const stdin: StdinData = {
+    model: { id: "x", display_name: "x" },
+    workspace: { current_dir: "/foo/bar/baz" },
+  };
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.gitStatus = null;
+  ctx.config.pathLevels = 2;
+  const out = renderProject(ctx);
+  expect(out).toContain("bar/baz");
+});
+
 test("context line — under threshold", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const out = renderContext(makeCtx(stdin, "anthropic"));

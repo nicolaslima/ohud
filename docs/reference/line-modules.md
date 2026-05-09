@@ -52,7 +52,7 @@ Quatro blocos opcionais separados pelo glyph `sep` (` │ ` em unicode, ` | ` em
 | Bloco | Vem de | Liga com |
 |---|---|---|
 | Model badge `[name]` | `stdin.model.display_name` ou `stdin.model.id` | `display.showModel` |
-| Project path | `stdin.workspace.current_dir` ou `stdin.cwd`, slice por `pathLevels` | sempre on se houver dir |
+| Project path | Prefere `basename(stdin.workspace.project_dir)` (estável entre worktrees); senão `stdin.workspace.current_dir`/`stdin.cwd` slice por `pathLevels` | sempre on se houver dir |
 | Git block `git:(...)` | `git status -b` cacheado em `src/git.ts` | `gitStatus.enabled` |
 | Effort `effort:LEVEL` | `stdin.effort.level` resolvido por `src/effort.ts` | `display.showEffortLevel` |
 

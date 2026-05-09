@@ -27,11 +27,23 @@ function modelBadge(ctx: RenderContext): string {
 }
 
 function projectPath(ctx: RenderContext): string {
+  // Prefer workspace.project_dir basename — stable repo root regardless of worktree.
+  const projectDir = ctx.stdin.workspace?.project_dir?.trim() ?? "";
+  if (projectDir) {
+    const base = basename(projectDir);
+    if (base) return base;
+  }
+  // Fallback: current_dir (or cwd) sliced by pathLevels.
   const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd ?? "";
   if (!dir) return "";
   const parts = dir.split("/").filter(Boolean);
   const n = ctx.config.pathLevels;
   return parts.slice(-n).join("/");
+}
+
+function basename(p: string): string {
+  const parts = p.split("/").filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1]! : "";
 }
 
 function gitBlock(ctx: RenderContext): string {

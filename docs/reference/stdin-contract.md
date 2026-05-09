@@ -59,8 +59,8 @@ The shape is documented in `src/types.ts:StdinData`. All fields are optional —
 | Field | Type | Used by | Notes |
 |---|---|---|---|
 | `cwd` | `string?` | `src/git.ts`, `src/render/lines/project.ts` | Fallback if `workspace.current_dir` missing. |
-| `workspace.current_dir` | `string?` | `project.ts`, `git.ts` | Preferred over `cwd`. The actual session directory. |
-| `workspace.project_dir` | `string?` | (not currently consumed) | Reserved for v0.2. |
+| `workspace.current_dir` | `string?` | `project.ts`, `git.ts` | The actual session directory. Used for project label fallback (sliced by `pathLevels`) when `project_dir` is absent. |
+| `workspace.project_dir` | `string?` | `project.ts` | **Preferred for project label** when non-empty. Renders as `basename(project_dir)` so the label shows the canonical repo root regardless of worktree (e.g., `claude-code` instead of `release+setup-plugin-structure`). Falls back to `current_dir`/`cwd` when absent, empty, or just `/`. |
 | `workspace.added_dirs` | `string[]?` | (not currently consumed) | Reserved. |
 | `workspace.git_worktree` | `string?` | (not currently consumed) | Reserved — would let project line distinguish worktrees of the same repo. |
 

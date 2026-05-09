@@ -837,12 +837,22 @@ function modelBadge(ctx) {
   return param ? `${name} ${glyph("bolt", ctx.config.display.glyphs)} ${param}` : name;
 }
 function projectPath(ctx) {
+  const projectDir = ctx.stdin.workspace?.project_dir?.trim() ?? "";
+  if (projectDir) {
+    const base = basename(projectDir);
+    if (base)
+      return base;
+  }
   const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd ?? "";
   if (!dir)
     return "";
   const parts = dir.split("/").filter(Boolean);
   const n = ctx.config.pathLevels;
   return parts.slice(-n).join("/");
+}
+function basename(p) {
+  const parts = p.split("/").filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : "";
 }
 function gitBlock(ctx) {
   if (!ctx.config.gitStatus.enabled || !ctx.gitStatus)
@@ -1050,13 +1060,13 @@ function renderTools(ctx) {
   const c = ctx.config.colors;
   const parts = [];
   for (const t of running)
-    parts.push(`${color(c.label, glyph("running", ctx.config.display.glyphs))} ${t.name}${t.target ? `: ${basename(t.target)}` : ""}`);
+    parts.push(`${color(c.label, glyph("running", ctx.config.display.glyphs))} ${t.name}${t.target ? `: ${basename2(t.target)}` : ""}`);
   const tally = countByName(completed);
   for (const [name, count] of tally)
     parts.push(`${color(c.label, glyph("done", ctx.config.display.glyphs))} ${name}${count > 1 ? ` ×${count}` : ""}`);
   return parts.join(color(c.label, " | "));
 }
-function basename(p) {
+function basename2(p) {
   const i = p.lastIndexOf("/");
   return i >= 0 ? p.slice(i + 1) : p;
 }
