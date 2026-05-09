@@ -9,6 +9,11 @@ Auto-detects whether your Claude Code session is running against Ollama Cloud or
 
 Plus opt-in lines for tools activity, agent status, todo progress, environment counts, memory usage, and session duration.
 
+## Requirements
+
+- **Claude Code** (any recent version)
+- **Bun** (recommended) or **Node.js 18+** on `PATH`
+
 ## Install
 
 ```
@@ -19,6 +24,15 @@ Plus opt-in lines for tools activity, agent status, todo progress, environment c
 Restart Claude Code (Cmd+Q on macOS, then reopen). The HUD appears automatically.
 
 **Optional**: run `/ohud configure` to pick a preset (Full / Essential / Minimal). Run `/ohud doctor` if anything looks wrong.
+
+## What it looks like
+
+```
+[glm-5:cloud ⚡ 1T] │ ohud │ git:(feat/v0.1* ↑3 ↓1) │ effort:max
+Context ████░░░░░░ 43% │ API ⏱ 4m 12s
+Tools ◐ Read ×42 │ Edit ×17
+Cost ~$3.21 │ Cache ▣ 78%
+```
 
 ## Configure
 
@@ -48,6 +62,18 @@ Full design spec: [`docs/superpowers/specs/2026-05-08-ohud-design.md`](docs/supe
 ## Inspiration
 
 Visual layout inspired by [`claude-hud`](https://github.com/jarrodwatts/claude-hud) by Jarrod Watts. ohud is an independent reimplementation, not a fork.
+
+## Troubleshooting
+
+If the statusline is blank, run:
+
+```
+/ohud doctor
+```
+
+This shows version, mode, probe state, active config flags (with consumed/dead annotation), and the last 5 errors from `~/.claude/plugins/ohud/last-errors.log`.
+
+To verify which mode you're in, look at the model badge: `⚡ <param-size>` indicates Ollama Cloud mode; absence indicates Anthropic mode.
 
 ## License
 
