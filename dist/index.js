@@ -2,8 +2,9 @@ import { createRequire } from "node:module";
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // src/index.ts
-import { homedir as homedir2 } from "node:os";
-import { join as join3 } from "node:path";
+import { homedir as homedir3 } from "node:os";
+import { join as join4 } from "node:path";
+import { appendFileSync, mkdirSync } from "node:fs";
 
 // src/stdin.ts
 var DEFAULT_FIRST_BYTE_TIMEOUT_MS = 250;
@@ -81,7 +82,7 @@ async function readStdin(stream = process.stdin, options = {}) {
 }
 
 // src/ollama-probe.ts
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 function probeCachePath(sessionId) {
@@ -91,48 +92,66 @@ async function fetchWithTimeout(url, timeoutMs, fetchImpl) {
   const controller = new AbortController;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(url, { signal: controller.signal });
-    return res;
+    return await fetchImpl(url, { signal: controller.signal });
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
   }
 }
-function readCache(path, ttlMs) {
+function readCache(path) {
   if (!existsSync(path))
     return null;
   try {
     const raw = readFileSync(path, "utf8");
-    const parsed = JSON.parse(raw);
-    if (Date.now() - parsed.fetchedAt > ttlMs)
-      return null;
-    return parsed;
+    return JSON.parse(raw);
   } catch {
     return null;
   }
 }
 function writeCache(path, data) {
   try {
-    writeFileSync(path, JSON.stringify(data));
+    const tmp = path + ".tmp";
+    writeFileSync(tmp, JSON.stringify(data));
+    renameSync(tmp, path);
   } catch {}
 }
 async function probeOllama(opts) {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const cachePath = probeCachePath(opts.sessionId);
-  const ttlMs = opts.ttlSeconds * 1000;
-  const cached = readCache(cachePath, ttlMs);
-  if (cached)
-    return cached;
-  const versionRes = await fetchWithTimeout(`${opts.host}/api/version`, opts.timeoutMs, fetchImpl);
+  const cached = readCache(cachePath);
+  const now = Date.now();
+  if (cached && cached.host === opts.host) {
+    const daemonAge = now - cached.fetchedAt;
+    const cloudAge = now - (cached.cloudModelsAt ?? cached.fetchedAt);
+    const daemonFresh = daemonAge < opts.daemonTtlSeconds * 1000 && cached.daemonOk;
+    const cloudFresh = cloudAge < opts.cloudModelsTtlSeconds * 1000;
+    if (daemonFresh && cloudFresh)
+      return cached;
+  }
+  const [versionRes, tagsRes] = await Promise.all([
+    fetchWithTimeout(`${opts.host}/api/version`, opts.timeoutMs, fetchImpl),
+    fetchWithTimeout(`${opts.host}/api/tags`, opts.timeoutMs, fetchImpl)
+  ]);
   if (!versionRes || !versionRes.ok) {
-    const result2 = { daemonOk: false, cloudModels: [], fetchedAt: Date.now() };
+    const result2 = {
+      daemonOk: false,
+      cloudModels: cached?.host === opts.host ? cached.cloudModels : [],
+      fetchedAt: now,
+      cloudModelsAt: cached?.cloudModelsAt ?? now,
+      host: opts.host
+    };
     writeCache(cachePath, result2);
     return result2;
   }
-  const tagsRes = await fetchWithTimeout(`${opts.host}/api/tags`, opts.timeoutMs, fetchImpl);
   if (!tagsRes || !tagsRes.ok) {
-    const result2 = { daemonOk: true, cloudModels: [], fetchedAt: Date.now() };
+    const result2 = {
+      daemonOk: true,
+      cloudModels: cached?.host === opts.host ? cached.cloudModels : [],
+      fetchedAt: now,
+      cloudModelsAt: cached?.cloudModelsAt ?? now,
+      host: opts.host
+    };
     writeCache(cachePath, result2);
     return result2;
   }
@@ -141,37 +160,264 @@ async function probeOllama(opts) {
     parsed = await tagsRes.json();
   } catch {}
   const cloudModels = (parsed.models ?? []).filter((m) => typeof m.remote_host === "string" && m.remote_host.length > 0);
-  const result = { daemonOk: true, cloudModels, fetchedAt: Date.now() };
+  const result = {
+    daemonOk: true,
+    cloudModels,
+    fetchedAt: now,
+    cloudModelsAt: now,
+    host: opts.host
+  };
   writeCache(cachePath, result);
   return result;
+}
+
+// src/doctor.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
+import { homedir } from "node:os";
+import { join as join2 } from "node:path";
+
+// src/config.ts
+import { readFile } from "node:fs/promises";
+var DEFAULT_CONFIG = {
+  lineLayout: "expanded",
+  pathLevels: 1,
+  maxWidth: null,
+  elementOrder: [
+    "project",
+    "context",
+    "apiTime",
+    "usage",
+    "cost",
+    "promptCache",
+    "memory",
+    "environment",
+    "tools",
+    "agents",
+    "todos"
+  ],
+  display: {
+    mergeGroups: [["context", "apiTime"], ["context", "usage"]],
+    showModel: true,
+    showContextBar: true,
+    contextValue: "percent",
+    showApiTime: true,
+    showUsage: true,
+    usageBarEnabled: true,
+    usageCompact: false,
+    showResetLabel: true,
+    timeFormat: "relative",
+    sevenDayThreshold: 80,
+    externalUsagePath: "",
+    externalUsageFreshnessMs: 300000,
+    showCost: false,
+    showPromptCache: false,
+    promptCacheTtlSeconds: 300,
+    showTools: false,
+    showAgents: false,
+    showTodos: false,
+    showConfigCounts: false,
+    showDuration: false,
+    showSpeed: false,
+    showMemoryUsage: false,
+    showEffortLevel: true,
+    glyphs: "auto"
+  },
+  gitStatus: {
+    enabled: true,
+    showDirty: true,
+    showAheadBehind: false,
+    pushWarningThreshold: 0,
+    pushCriticalThreshold: 0
+  },
+  colors: {
+    context: "green",
+    apiTime: "brightBlue",
+    usage: "brightBlue",
+    warning: "yellow",
+    usageWarning: "brightMagenta",
+    critical: "red",
+    model: "cyan",
+    project: "yellow",
+    git: "magenta",
+    gitBranch: "cyan",
+    label: "dim"
+  },
+  ollama: {
+    host: "http://localhost:11434",
+    daemonTtlSeconds: 5,
+    cloudModelsTtlSeconds: 120,
+    probeTimeoutMs: 500
+  }
+};
+function deepMerge(base, override) {
+  if (override === null || typeof override !== "object" || Array.isArray(override))
+    return base;
+  const result = { ...base };
+  for (const [k, v] of Object.entries(override)) {
+    const baseVal = base[k];
+    if (baseVal && typeof baseVal === "object" && !Array.isArray(baseVal)) {
+      result[k] = deepMerge(baseVal, v);
+    } else {
+      result[k] = v;
+    }
+  }
+  return result;
+}
+async function loadConfig(path) {
+  const base = structuredClone(DEFAULT_CONFIG);
+  let raw;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch {
+    return base;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return base;
+  }
+  return deepMerge(base, parsed);
+}
+
+// src/doctor.ts
+var CONSUMED_FLAGS = new Set([
+  "showModel",
+  "showContextBar",
+  "contextValue",
+  "showApiTime",
+  "showUsage",
+  "usageBarEnabled",
+  "usageCompact",
+  "showResetLabel",
+  "timeFormat",
+  "sevenDayThreshold",
+  "externalUsagePath",
+  "externalUsageFreshnessMs",
+  "showCost",
+  "showPromptCache",
+  "promptCacheTtlSeconds",
+  "showTools",
+  "showAgents",
+  "showTodos",
+  "showConfigCounts",
+  "showDuration",
+  "showSpeed",
+  "showMemoryUsage",
+  "showEffortLevel",
+  "glyphs",
+  "showAheadBehind",
+  "pushWarningThreshold",
+  "pushCriticalThreshold"
+]);
+async function runDoctor(opts) {
+  const lines = [];
+  const pkg = readPackageJson();
+  lines.push(`ohud version: ${pkg.version}`);
+  lines.push(`runtime: ${process.version} (process.argv0=${process.argv0})`);
+  const bundle = opts.bundlePath ?? resolveBundlePath();
+  lines.push(`resolved bundle: ${bundle} (exists: ${existsSync2(bundle) ? "yes" : "no"})`);
+  const cfg = await loadConfig(opts.configPath);
+  const probe = await probeOllama({
+    host: opts.host,
+    sessionId: "doctor",
+    daemonTtlSeconds: 0,
+    cloudModelsTtlSeconds: 0,
+    timeoutMs: 1500
+  });
+  lines.push(`probe: live (cache bypassed) — daemonOk: ${probe.daemonOk ? "yes" : "no"}`);
+  lines.push(`cloud models: ${probe.cloudModels.map((m) => m.name).join(", ") || "(none)"}`);
+  lines.push(`mode: ${probe.daemonOk && probe.cloudModels.length > 0 ? "ollama-capable" : "anthropic"}`);
+  lines.push(`
+active config flags (consumed?):`);
+  lines.push(renderFlagAnnotations(cfg));
+  const errLog = join2(homedir(), ".claude/plugins/ohud/last-errors.log");
+  if (existsSync2(errLog)) {
+    lines.push(`
+last errors (${errLog}):`);
+    try {
+      lines.push(readFileSync2(errLog, "utf8").split(`
+`).slice(-5).join(`
+`));
+    } catch {}
+  }
+  return lines.join(`
+`);
+}
+function renderFlagAnnotations(cfg) {
+  const out = [];
+  for (const [k, v] of Object.entries(cfg.display)) {
+    const tag = CONSUMED_FLAGS.has(k) ? "consumed" : "DEAD FLAG";
+    out.push(`  display.${k}: ${JSON.stringify(v)} (${tag})`);
+  }
+  for (const [k, v] of Object.entries(cfg.gitStatus)) {
+    const tag = CONSUMED_FLAGS.has(k) || k === "enabled" || k === "showDirty" ? "consumed" : "DEAD FLAG";
+    out.push(`  gitStatus.${k}: ${JSON.stringify(v)} (${tag})`);
+  }
+  return out.join(`
+`);
+}
+function resolveBundlePath() {
+  const root = process.env.CLAUDE_PLUGIN_ROOT;
+  if (root)
+    return join2(root, "dist", "index.js");
+  return join2(homedir(), ".claude/plugins/cache/owner/ohud/dist/index.js");
+}
+function readPackageJson() {
+  try {
+    const here = new URL("../package.json", import.meta.url).pathname;
+    const raw = readFileSync2(here, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return { version: "unknown" };
+  }
 }
 
 // src/mode.ts
 function resolveMode(stdin, probe) {
   if (!probe.daemonOk)
     return "anthropic";
-  if (probe.cloudModels.length === 0)
-    return "anthropic";
   const candidates = [stdin.model?.id, stdin.model?.display_name].filter((v) => typeof v === "string" && v.length > 0);
   if (candidates.length === 0)
     return "anthropic";
+  if (candidates.some((c) => c.endsWith(":cloud")))
+    return "ollama";
+  if (probe.cloudModels.length === 0)
+    return "anthropic";
   const cloudNames = new Set(probe.cloudModels.flatMap((m) => [m.name, m.model]));
-  const isCloud = candidates.some((c) => cloudNames.has(c));
-  return isCloud ? "ollama" : "anthropic";
+  return candidates.some((c) => cloudNames.has(c)) ? "ollama" : "anthropic";
 }
 
 // src/transcript.ts
-import { readFile } from "node:fs/promises";
+import { readFile as readFile2, stat } from "node:fs/promises";
+var cache = new Map;
 async function parseTranscript(path) {
-  const empty = { tools: [], agents: [], todos: [] };
   if (!path)
-    return empty;
+    return empty();
+  let st;
+  try {
+    st = await stat(path);
+  } catch {
+    return empty();
+  }
+  const cached = cache.get(path);
+  if (cached && cached.size === st.size && cached.mtimeMs === st.mtimeMs) {
+    return cached.data;
+  }
   let raw;
   try {
-    raw = await readFile(path, "utf8");
+    raw = await readFile2(path, "utf8");
   } catch {
-    return empty;
+    return empty();
   }
+  const data = parseRaw(raw);
+  cache.set(path, { size: st.size, mtimeMs: st.mtimeMs, data });
+  return data;
+}
+function empty() {
+  return { tools: [], agents: [], todos: [] };
+}
+function parseRaw(raw) {
   const lines = raw.split(`
 `).filter((l) => l.length > 0);
   const tools = new Map;
@@ -183,10 +429,6 @@ async function parseTranscript(path) {
     cacheCreationTokens: 0,
     cacheReadTokens: 0
   };
-  let totalDurationNs = 0;
-  let totalEvalCount = 0;
-  let totalEvalDurationNs = 0;
-  let sawOllamaTiming = false;
   let sessionStart;
   let lastAssistantResponseAt;
   let sessionName;
@@ -217,15 +459,6 @@ async function parseTranscript(path) {
       tokens.cacheReadTokens += Number(message.usage.cache_read_input_tokens ?? 0);
       if (ts)
         lastAssistantResponseAt = ts;
-      const found = findOllamaTiming(entry);
-      if (found.total_duration) {
-        totalDurationNs += found.total_duration;
-        sawOllamaTiming = true;
-      }
-      if (found.eval_count)
-        totalEvalCount += found.eval_count;
-      if (found.eval_duration)
-        totalEvalDurationNs += found.eval_duration;
     }
     if (Array.isArray(message.content)) {
       for (const block of message.content) {
@@ -272,7 +505,7 @@ async function parseTranscript(path) {
       }
     }
   }
-  const result = {
+  return {
     tools: [...tools.values()],
     agents: [...agents.values()],
     todos: latestTodos,
@@ -281,12 +514,6 @@ async function parseTranscript(path) {
     lastAssistantResponseAt,
     sessionTokens: tokens.inputTokens + tokens.outputTokens > 0 ? tokens : undefined
   };
-  if (sawOllamaTiming) {
-    result.totalDurationNs = totalDurationNs;
-    result.totalEvalCount = totalEvalCount;
-    result.totalEvalDurationNs = totalEvalDurationNs;
-  }
-  return result;
 }
 function extractTarget(input) {
   if (typeof input !== "object" || input === null)
@@ -302,171 +529,43 @@ function extractTarget(input) {
     return i.pattern;
   return;
 }
-function findOllamaTiming(obj, depth = 0) {
-  if (depth > 6 || obj == null || typeof obj !== "object")
-    return {};
-  if (Array.isArray(obj)) {
-    return obj.reduce((acc2, v) => mergeTiming(acc2, findOllamaTiming(v, depth + 1)), {});
-  }
-  const o = obj;
-  let acc = {};
-  if (typeof o.total_duration === "number")
-    acc.total_duration = o.total_duration;
-  if (typeof o.eval_count === "number")
-    acc.eval_count = o.eval_count;
-  if (typeof o.eval_duration === "number")
-    acc.eval_duration = o.eval_duration;
-  for (const v of Object.values(o))
-    acc = mergeTiming(acc, findOllamaTiming(v, depth + 1));
-  return acc;
-}
-function mergeTiming(a, b) {
-  return {
-    total_duration: a.total_duration ?? b.total_duration,
-    eval_count: a.eval_count ?? b.eval_count,
-    eval_duration: a.eval_duration ?? b.eval_duration
-  };
-}
 
 // src/git.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-var exec = promisify(execFile);
-async function git(cwd, args) {
-  try {
-    const { stdout } = await exec("git", args, { cwd, timeout: 1000 });
-    return stdout;
-  } catch {
-    return null;
-  }
-}
+var execFileP = promisify(execFile);
 async function getGitStatus(cwd) {
   if (!cwd)
     return null;
-  const inside = await git(cwd, ["rev-parse", "--is-inside-work-tree"]);
-  if (!inside)
+  let stdout;
+  try {
+    const r = await execFileP("git", ["status", "--branch", "--porcelain=v2"], { cwd, timeout: 1000 });
+    stdout = r.stdout;
+  } catch {
     return null;
-  const branch = (await git(cwd, ["branch", "--show-current"]))?.trim() ?? "";
-  const status = await git(cwd, ["status", "--porcelain=v1"]);
-  const dirty = !!(status && status.trim().length > 0);
+  }
+  const lines = stdout.split(`
+`);
+  let branch = "";
   let ahead = 0;
   let behind = 0;
-  const counts = await git(cwd, ["rev-list", "--left-right", "--count", "@{u}...HEAD"]);
-  if (counts) {
-    const [b, a] = counts.trim().split(/\s+/).map(Number);
-    if (Number.isFinite(a))
-      ahead = a;
-    if (Number.isFinite(b))
-      behind = b;
-  }
-  return { branch, dirty, ahead, behind };
-}
-
-// src/config.ts
-import { readFile as readFile2 } from "node:fs/promises";
-var DEFAULT_CONFIG = {
-  lineLayout: "expanded",
-  pathLevels: 1,
-  maxWidth: null,
-  elementOrder: [
-    "project",
-    "context",
-    "apiTime",
-    "usage",
-    "cost",
-    "promptCache",
-    "memory",
-    "environment",
-    "tools",
-    "agents",
-    "todos"
-  ],
-  display: {
-    mergeGroups: [["context", "apiTime"], ["context", "usage"]],
-    showModel: true,
-    showContextBar: true,
-    contextValue: "percent",
-    showApiTime: true,
-    showUsage: true,
-    usageBarEnabled: true,
-    usageCompact: false,
-    showResetLabel: true,
-    timeFormat: "relative",
-    sevenDayThreshold: 80,
-    externalUsagePath: "",
-    externalUsageFreshnessMs: 300000,
-    showCost: false,
-    showPromptCache: false,
-    promptCacheTtlSeconds: 300,
-    showTools: false,
-    showAgents: false,
-    showTodos: false,
-    showConfigCounts: false,
-    showOutputStyle: false,
-    showDuration: false,
-    showSpeed: false,
-    showMemoryUsage: false,
-    showTokenBreakdown: true,
-    showSessionName: false,
-    showClaudeCodeVersion: false,
-    showEffortLevel: true
-  },
-  gitStatus: {
-    enabled: true,
-    showDirty: true,
-    showAheadBehind: false,
-    pushWarningThreshold: 0,
-    pushCriticalThreshold: 0,
-    showFileStats: false,
-    branchOverflow: "truncate"
-  },
-  colors: {
-    context: "green",
-    apiTime: "brightBlue",
-    usage: "brightBlue",
-    warning: "yellow",
-    usageWarning: "brightMagenta",
-    critical: "red",
-    model: "cyan",
-    project: "yellow",
-    git: "magenta",
-    gitBranch: "cyan",
-    label: "dim"
-  },
-  ollama: {
-    host: "http://localhost:11434",
-    probeCacheTtlSeconds: 60,
-    probeTimeoutMs: 500
-  }
-};
-function deepMerge(base, override) {
-  if (override === null || typeof override !== "object" || Array.isArray(override))
-    return base;
-  const result = { ...base };
-  for (const [k, v] of Object.entries(override)) {
-    const baseVal = base[k];
-    if (baseVal && typeof baseVal === "object" && !Array.isArray(baseVal)) {
-      result[k] = deepMerge(baseVal, v);
-    } else {
-      result[k] = v;
+  let dirty = false;
+  for (const line of lines) {
+    if (line.startsWith("# branch.head "))
+      branch = line.slice("# branch.head ".length).trim();
+    else if (line.startsWith("# branch.ab ")) {
+      const m = /\+(\d+)\s+-(\d+)/.exec(line);
+      if (m) {
+        ahead = Number.parseInt(m[1], 10);
+        behind = Number.parseInt(m[2], 10);
+      }
+    } else if (line.length > 0 && !line.startsWith("#")) {
+      dirty = true;
     }
   }
-  return result;
-}
-async function loadConfig(path) {
-  let raw;
-  try {
-    raw = await readFile2(path, "utf8");
-  } catch {
-    return DEFAULT_CONFIG;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return DEFAULT_CONFIG;
-  }
-  return deepMerge(DEFAULT_CONFIG, parsed);
+  if (!branch)
+    return null;
+  return { branch, dirty, ahead, behind };
 }
 
 // src/usage.ts
@@ -637,7 +736,16 @@ var NAMED = {
   brightBlue: "\x1B[94m",
   brightMagenta: "\x1B[95m"
 };
+function colorDisabled() {
+  if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== "")
+    return true;
+  if (process.env.TERM === "dumb")
+    return true;
+  return false;
+}
 function color(spec, text) {
+  if (colorDisabled())
+    return text;
   if (NAMED[spec])
     return `${NAMED[spec]}${text}${RESET}`;
   if (/^\d+$/.test(spec)) {
@@ -656,12 +764,53 @@ function color(spec, text) {
   return text;
 }
 
+// src/render/glyphs.ts
+var UNICODE = {
+  bolt: "⚡",
+  clock: "⏱",
+  running: "◐",
+  done: "✓",
+  todo: "▹",
+  active: "▸",
+  sep: "│",
+  barFull: "█",
+  barEmpty: "░",
+  up: "↑",
+  down: "↓"
+};
+var ASCII = {
+  bolt: "*",
+  clock: "t",
+  running: "o",
+  done: "x",
+  todo: "-",
+  active: ">",
+  sep: "|",
+  barFull: "#",
+  barEmpty: ".",
+  up: "^",
+  down: "v"
+};
+function autoMode() {
+  const lang = process.env.LANG ?? "";
+  if (lang.includes("UTF-8") || lang.toLowerCase().includes("utf8"))
+    return "unicode";
+  if (process.env.LC_ALL?.includes("UTF-8"))
+    return "unicode";
+  return "ascii";
+}
+function glyph(key, mode) {
+  const resolved = mode === "auto" ? autoMode() : mode;
+  return resolved === "ascii" ? ASCII[key] : UNICODE[key];
+}
+
 // src/render/lines/project.ts
 function renderProject(ctx) {
   const c = ctx.config;
   const modelLabel = modelBadge(ctx);
   const projectLabel = projectPath(ctx);
   const gitLabel = gitBlock(ctx);
+  const effortLabel = effortBlock(ctx);
   const parts = [];
   if (c.display.showModel && modelLabel)
     parts.push(color(c.colors.model, `[${modelLabel}]`));
@@ -669,7 +818,9 @@ function renderProject(ctx) {
     parts.push(color(c.colors.project, projectLabel));
   if (gitLabel)
     parts.push(gitLabel);
-  return parts.join(color(c.colors.label, " │ "));
+  if (effortLabel)
+    parts.push(effortLabel);
+  return parts.join(color(c.colors.label, ` ${glyph("sep", c.display.glyphs)} `));
 }
 function modelBadge(ctx) {
   const name = ctx.stdin.model?.display_name ?? ctx.stdin.model?.id ?? "model";
@@ -677,7 +828,7 @@ function modelBadge(ctx) {
     return name;
   const cloudInfo = ctx.cloudModels.find((m) => m.name === ctx.stdin.model?.id || m.model === ctx.stdin.model?.id);
   const param = cloudInfo?.details?.parameter_size;
-  return param ? `${name} ⚡ ${param}` : name;
+  return param ? `${name} ${glyph("bolt", ctx.config.display.glyphs)} ${param}` : name;
 }
 function projectPath(ctx) {
   const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd ?? "";
@@ -692,8 +843,23 @@ function gitBlock(ctx) {
     return "";
   const c = ctx.config.colors;
   const wrapper = (s) => color(c.git, s);
-  const branch = color(c.gitBranch, ctx.gitStatus.branch + (ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty ? "*" : ""));
-  return `${wrapper("git:(")}${branch}${wrapper(")")}`;
+  const dirtyMark = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty ? "*" : "";
+  const branch = color(c.gitBranch, ctx.gitStatus.branch + dirtyMark);
+  let aheadBehind = "";
+  if (ctx.config.gitStatus.showAheadBehind) {
+    const a = ctx.gitStatus.ahead;
+    const b = ctx.gitStatus.behind;
+    if (a > 0 || b > 0) {
+      const aColor = ctx.config.gitStatus.pushCriticalThreshold > 0 && a >= ctx.config.gitStatus.pushCriticalThreshold ? c.critical : ctx.config.gitStatus.pushWarningThreshold > 0 && a >= ctx.config.gitStatus.pushWarningThreshold ? c.warning : c.gitBranch;
+      aheadBehind = ` ${color(aColor, `${glyph("up", ctx.config.display.glyphs)}${a}`)} ${color(c.gitBranch, `${glyph("down", ctx.config.display.glyphs)}${b}`)}`;
+    }
+  }
+  return `${wrapper("git:(")}${branch}${aheadBehind}${wrapper(")")}`;
+}
+function effortBlock(ctx) {
+  if (!ctx.config.display.showEffortLevel || !ctx.effortLevel)
+    return "";
+  return color(ctx.config.colors.label, `effort:${ctx.effortLevel}`);
 }
 
 // src/render/lines/context.ts
@@ -712,8 +878,8 @@ function renderContext(ctx) {
   else if (rounded >= 70)
     barColor = c.warning;
   const filled = Math.floor(rounded * BAR_WIDTH / 100);
-  const empty = BAR_WIDTH - filled;
-  const bar = "█".repeat(filled) + "░".repeat(empty);
+  const empty2 = BAR_WIDTH - filled;
+  const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(empty2);
   const valuePart = formatValue(ctx, rounded);
   return `${color(c.label, "Context")} ${color(barColor, bar)} ${color(barColor, valuePart)}`;
 }
@@ -741,13 +907,9 @@ function renderApiTime(ctx) {
   if (!ctx.config.display.showApiTime)
     return null;
   const c = ctx.config.colors;
-  const ns = ctx.transcript.totalDurationNs;
-  if (typeof ns === "number" && ns > 0) {
-    return `${color(c.label, "GPU")} ${color(c.apiTime, `⏱ ${formatDuration(ns / 1e6)}`)}`;
-  }
   const apiMs = ctx.stdin.cost?.total_api_duration_ms;
   if (typeof apiMs === "number" && apiMs > 0) {
-    return `${color(c.label, "API")} ${color(c.apiTime, `⏱ ${formatDuration(apiMs)}`)}`;
+    return `${color(c.label, "API")} ${color(c.apiTime, `${glyph("clock", ctx.config.display.glyphs)} ${formatDuration(apiMs)}`)}`;
   }
   return null;
 }
@@ -784,19 +946,45 @@ function renderUsage(ctx) {
   const c = ctx.config.colors;
   return `${color(c.label, "Usage")} ${parts.join(" | ")}`;
 }
-function formatWindow(ctx, label, pct, _resetAt) {
+function formatWindow(ctx, label, pct, resetAt) {
   const c = ctx.config.colors;
   let lineColor = c.usage;
   if (pct >= 85)
     lineColor = c.critical;
   else if (pct >= 60)
     lineColor = c.usageWarning;
+  let core;
   if (ctx.config.display.usageBarEnabled && !ctx.config.display.usageCompact) {
     const filled = Math.floor(pct * BAR_WIDTH2 / 100);
-    const bar = "█".repeat(filled) + "░".repeat(BAR_WIDTH2 - filled);
-    return `${color(lineColor, bar)} ${color(lineColor, `${pct}%`)} (${label})`;
+    const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(BAR_WIDTH2 - filled);
+    core = `${color(lineColor, bar)} ${color(lineColor, `${pct}%`)} (${label})`;
+  } else {
+    core = color(lineColor, `${label}: ${pct}%`);
   }
-  return color(lineColor, `${label}: ${pct}%`);
+  if (ctx.config.display.showResetLabel && resetAt) {
+    core += " " + color(c.label, formatReset(resetAt, ctx.config.display.timeFormat));
+  }
+  return core;
+}
+function formatReset(resetAt, fmt) {
+  const deltaMs = resetAt.getTime() - Date.now();
+  const rel = relativeTime(deltaMs);
+  if (fmt === "relative")
+    return `resets in ${rel}`;
+  const abs = resetAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (fmt === "absolute")
+    return `resets at ${abs}`;
+  return `resets in ${rel} (${abs})`;
+}
+function relativeTime(ms) {
+  if (ms <= 0)
+    return "now";
+  const min = Math.floor(ms / 60000);
+  if (min < 60)
+    return `~${min}m`;
+  const h = Math.floor(min / 60);
+  const remM = min % 60;
+  return remM > 0 ? `~${h}h${remM}m` : `~${h}h`;
 }
 
 // src/render/lines/cost.ts
@@ -854,10 +1042,10 @@ function renderTools(ctx) {
   const c = ctx.config.colors;
   const parts = [];
   for (const t of running)
-    parts.push(`${color(c.label, "◐")} ${t.name}${t.target ? `: ${basename(t.target)}` : ""}`);
+    parts.push(`${color(c.label, glyph("running", ctx.config.display.glyphs))} ${t.name}${t.target ? `: ${basename(t.target)}` : ""}`);
   const tally = countByName(completed);
   for (const [name, count] of tally)
-    parts.push(`${color(c.label, "✓")} ${name}${count > 1 ? ` ×${count}` : ""}`);
+    parts.push(`${color(c.label, glyph("done", ctx.config.display.glyphs))} ${name}${count > 1 ? ` ×${count}` : ""}`);
   return parts.join(color(c.label, " | "));
 }
 function basename(p) {
@@ -880,7 +1068,7 @@ function renderAgents(ctx) {
     return null;
   const c = ctx.config.colors;
   const parts = agents.map((a) => {
-    const sym = a.status === "running" ? "◐" : "✓";
+    const sym = a.status === "running" ? glyph("running", ctx.config.display.glyphs) : glyph("done", ctx.config.display.glyphs);
     const modelTag = a.model ? ` [${a.model}]` : "";
     const desc = a.description ? `: ${a.description}` : "";
     const elapsed = a.endTime ? "" : ` (${formatElapsed(a.startTime)})`;
@@ -906,14 +1094,14 @@ function renderTodos(ctx) {
   const completed = todos.filter((t) => t.status === "completed").length;
   const inProgress = todos.find((t) => t.status === "in_progress");
   const c = ctx.config.colors;
-  const head = inProgress ? `${color(c.label, "▸")} ${inProgress.content}` : `${color(c.label, "▹")} no active todo`;
+  const head = inProgress ? `${color(c.label, glyph("active", ctx.config.display.glyphs))} ${inProgress.content}` : `${color(c.label, glyph("todo", ctx.config.display.glyphs))} no active todo`;
   return `${head} ${color(c.label, `(${completed}/${total})`)}`;
 }
 
 // src/render/lines/environment.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
-import { dirname, join as join2 } from "node:path";
-import { homedir } from "node:os";
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
+import { dirname, join as join3 } from "node:path";
+import { homedir as homedir2 } from "node:os";
 function renderEnvironment(ctx) {
   if (!ctx.config.display.showConfigCounts)
     return null;
@@ -931,18 +1119,18 @@ function renderEnvironment(ctx) {
   return color(c.label, parts.join(" | "));
 }
 function countAll(startDir) {
-  const home = homedir();
+  const home = homedir2();
   let claudeMd = 0;
   let dir = startDir;
   while (dir && dir.length > 1 && dir.startsWith(home)) {
-    if (existsSync2(join2(dir, "CLAUDE.md")))
+    if (existsSync3(join3(dir, "CLAUDE.md")))
       claudeMd += 1;
     const parent = dirname(dir);
     if (parent === dir)
       break;
     dir = parent;
   }
-  const settings = readSettings(join2(home, ".claude/settings.json"));
+  const settings = readSettings(join3(home, ".claude/settings.json"));
   const mcps = Object.keys(settings?.mcpServers ?? {}).length;
   const hooks = countHooks(settings?.hooks);
   const rules = readRules(startDir);
@@ -950,7 +1138,7 @@ function countAll(startDir) {
 }
 function readSettings(path) {
   try {
-    return JSON.parse(readFileSync2(path, "utf8"));
+    return JSON.parse(readFileSync3(path, "utf8"));
   } catch {
     return null;
   }
@@ -966,11 +1154,11 @@ function countHooks(hooks) {
   return n;
 }
 function readRules(startDir) {
-  const path = join2(startDir, ".claude/rules.md");
-  if (!existsSync2(path))
+  const path = join3(startDir, ".claude/rules.md");
+  if (!existsSync3(path))
     return 0;
   try {
-    const content = readFileSync2(path, "utf8");
+    const content = readFileSync3(path, "utf8");
     return content.split(`
 `).filter((l) => /^[-*]\s+\S/.test(l)).length;
   } catch {
@@ -989,7 +1177,7 @@ function renderMemory(ctx) {
     return null;
   const c = ctx.config.colors;
   const filled = Math.floor(ctx.memoryInfo.usedPercent * BAR_WIDTH3 / 100);
-  const bar = "█".repeat(filled) + "░".repeat(BAR_WIDTH3 - filled);
+  const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(BAR_WIDTH3 - filled);
   const usedGb = (ctx.memoryInfo.usedBytes / 1e9).toFixed(1);
   const totalGb = (ctx.memoryInfo.totalBytes / 1e9).toFixed(1);
   return `${color(c.label, "RAM")} ${color(c.usage, bar)} ${color(c.label, `${ctx.memoryInfo.usedPercent}% (${usedGb} GB / ${totalGb} GB)`)}`;
@@ -1023,13 +1211,87 @@ function formatHms(ms) {
   const s = total % 60;
   return m > 0 ? `${m}m` : `${s}s`;
 }
-function computeTokensPerSecond(ctx) {
-  const eval_count = ctx.transcript.totalEvalCount;
-  const eval_dur_ns = ctx.transcript.totalEvalDurationNs;
-  if (typeof eval_count === "number" && typeof eval_dur_ns === "number" && eval_dur_ns > 0) {
-    return eval_count * 1e9 / eval_dur_ns;
-  }
+function computeTokensPerSecond(_ctx) {
   return null;
+}
+
+// src/render/width.ts
+var WIDTH_2_GLYPHS = new Set(["⚡", "⏱", "◐", "✓", "▸", "▹"]);
+function wcwidth(s) {
+  let w = 0;
+  for (const ch of s) {
+    if (WIDTH_2_GLYPHS.has(ch)) {
+      w += 2;
+      continue;
+    }
+    const cp = ch.codePointAt(0) ?? 0;
+    if (cp >= 127744 && cp <= 129791) {
+      w += 2;
+      continue;
+    }
+    if (cp >= 65072 && cp <= 65103) {
+      w += 2;
+      continue;
+    }
+    if (cp >= 11904 && cp <= 12350) {
+      w += 2;
+      continue;
+    }
+    if (cp >= 12353 && cp <= 13311) {
+      w += 2;
+      continue;
+    }
+    if (cp >= 13312 && cp <= 19903) {
+      w += 2;
+      continue;
+    }
+    if (cp >= 19968 && cp <= 40959) {
+      w += 2;
+      continue;
+    }
+    if (cp >= 44032 && cp <= 55203) {
+      w += 2;
+      continue;
+    }
+    w += 1;
+  }
+  return w;
+}
+var ANSI_RE = /\x1b\[[0-9;]*m/g;
+function visibleWidth(s) {
+  return wcwidth(s.replace(ANSI_RE, ""));
+}
+function truncateLine(line, max) {
+  if (visibleWidth(line) <= max)
+    return line;
+  let out = "";
+  let visible = 0;
+  let i = 0;
+  while (i < line.length && visible < max - 1) {
+    const slice = line.slice(i);
+    const match = /^\x1b\[[0-9;]*m/.exec(slice);
+    if (match) {
+      out += match[0];
+      i += match[0].length;
+      continue;
+    }
+    const ch = line.slice(i, i + 1);
+    const w = wcwidth(ch);
+    if (visible + w > max - 1)
+      break;
+    out += ch;
+    visible += w;
+    i += 1;
+  }
+  return out + "…\x1B[0m";
+}
+function detectTerminalWidth(env, fallback) {
+  const cols = env.COLUMNS ? Number.parseInt(env.COLUMNS, 10) : NaN;
+  if (Number.isFinite(cols) && cols > 0)
+    return cols;
+  if (process.stdout.columns && process.stdout.columns > 0)
+    return process.stdout.columns;
+  return fallback ?? 120;
 }
 
 // src/render/index.ts
@@ -1070,24 +1332,36 @@ function render(ctx) {
       lines.push(out);
     rendered.add(key);
   }
-  return lines.join(`
+  const max = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
+  const truncated = lines.map((l) => truncateLine(l, max));
+  if (truncated.length === 0 || truncated.every((l) => l.trim() === "")) {
+    return color(ctx.config.colors.label, "ohud");
+  }
+  return truncated.join(`
 `);
 }
 function collectMerged(ctx) {
   const ctxLine = renderContext(ctx);
   const right = ctx.mode === "ollama" ? renderApiTime(ctx) : renderUsage(ctx);
   if (ctxLine && right) {
-    const sep = color(ctx.config.colors.label, "│");
+    const sep = color(ctx.config.colors.label, glyph("sep", ctx.config.display.glyphs));
     return `${ctxLine} ${sep} ${right}`;
   }
   return ctxLine ?? right ?? null;
 }
 
 // src/index.ts
-var CONFIG_PATH = join3(homedir2(), ".claude/plugins/ohud/config.json");
+var CONFIG_PATH = join4(homedir3(), ".claude/plugins/ohud/config.json");
+mkdirSync(join4(homedir3(), ".claude/plugins/ohud"), { recursive: true });
 async function main() {
   const T0 = process.hrtime.bigint();
   const profile = process.env.OHUD_PROFILE === "1";
+  if (process.argv.includes("--doctor")) {
+    const cfg = await loadConfig(CONFIG_PATH);
+    const out = await runDoctor({ host: cfg.ollama.host, configPath: CONFIG_PATH });
+    console.log(out);
+    return;
+  }
   try {
     const stdin = await readStdin();
     if (!stdin) {
@@ -1096,17 +1370,18 @@ async function main() {
     }
     const config = await loadConfig(CONFIG_PATH);
     const sessionId = stdin.session_id ?? "default";
-    const probe = await probeOllama({
-      host: config.ollama.host,
-      sessionId,
-      ttlSeconds: config.ollama.probeCacheTtlSeconds,
-      timeoutMs: config.ollama.probeTimeoutMs
-    });
-    const mode = resolveMode(stdin, probe);
-    const [transcript, gitStatus] = await Promise.all([
+    const [probe, transcript, gitStatus] = await Promise.all([
+      probeOllama({
+        host: config.ollama.host,
+        sessionId,
+        daemonTtlSeconds: config.ollama.daemonTtlSeconds,
+        cloudModelsTtlSeconds: config.ollama.cloudModelsTtlSeconds,
+        timeoutMs: config.ollama.probeTimeoutMs
+      }),
       parseTranscript(stdin.transcript_path ?? ""),
       config.gitStatus.enabled ? getGitStatus(stdin.workspace?.current_dir ?? stdin.cwd) : Promise.resolve(null)
     ]);
+    const mode = resolveMode(stdin, probe);
     let usageData = null;
     let costData = null;
     if (mode === "anthropic") {
@@ -1139,7 +1414,16 @@ async function main() {
     if (output)
       console.log(output);
   } catch (err) {
-    console.error("ohud: error", err instanceof Error ? err.message : String(err));
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log("\x1B[31mohud: error — see /ohud doctor or ~/.claude/plugins/ohud/last-errors.log\x1B[0m");
+    try {
+      const logPath = join4(homedir3(), ".claude/plugins/ohud/last-errors.log");
+      const stamp = new Date().toISOString();
+      const line = `[${stamp}] ${msg}
+`;
+      appendFileSync(logPath, line);
+    } catch {}
+    console.error("ohud: error", msg);
   }
 }
 if (__require.main == __require.module) {
