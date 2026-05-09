@@ -97,3 +97,39 @@ test("integration: ollama-local mode produces non-empty stdout", async () => {
   const out = captured.join("\n");
   expect(out).not.toMatch(/MODULE_NOT_FOUND|aborted/);
 });
+
+test("integration: hot path completes under 300ms in steady state", async () => {
+  const payload = {
+    session_id: "perf-warm",
+    transcript_path: "/tmp/no",
+    model: { id: "glm-5:cloud", display_name: "glm-5:cloud" },
+    workspace: { current_dir: process.cwd() },
+    context_window: { used_percentage: 50 },
+  };
+  // First call warms cache
+  const r1 = makeStdinFixture(payload);
+  const o1: string[] = [];
+  const log1 = console.log;
+  console.log = (s: string) => o1.push(s);
+  try {
+    await main();
+  } finally {
+    console.log = log1;
+    r1();
+  }
+
+  // Second call measures steady-state
+  const r2 = makeStdinFixture(payload);
+  const o2: string[] = [];
+  const log2 = console.log;
+  console.log = (s: string) => o2.push(s);
+  const t0 = performance.now();
+  try {
+    await main();
+  } finally {
+    console.log = log2;
+    r2();
+  }
+  const elapsed = performance.now() - t0;
+  expect(elapsed).toBeLessThan(300);
+});
