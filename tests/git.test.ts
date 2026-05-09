@@ -37,3 +37,24 @@ test("returns null when not in a git repo", async () => {
   expect(s).toBeNull();
   rmSync(notRepo, { recursive: true, force: true });
 });
+
+test("getGitStatus parses ahead/behind from porcelain=v2", async () => {
+  const upstream = mkdtempSync(join(tmpdir(), "ohud-git-upstream-"));
+  const dir = mkdtempSync(join(tmpdir(), "ohud-git-ab-"));
+  try {
+    execSync(`git init -b main "${upstream}"`);
+    execSync(`cd "${upstream}" && git -c user.name=t -c user.email=t@t commit --allow-empty -m base`);
+    execSync(`git clone "${upstream}" "${dir}"`);
+    execSync(`cd "${dir}" && git -c user.name=t -c user.email=t@t commit --allow-empty -m local1`);
+    execSync(`cd "${dir}" && git -c user.name=t -c user.email=t@t commit --allow-empty -m local2`);
+    execSync(`cd "${upstream}" && git -c user.name=t -c user.email=t@t commit --allow-empty -m remote`);
+    execSync(`cd "${dir}" && git fetch`);
+    const s = await getGitStatus(dir);
+    expect(s?.branch).toBe("main");
+    expect(s?.ahead).toBe(2);
+    expect(s?.behind).toBe(1);
+  } finally {
+    rmSync(upstream, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
