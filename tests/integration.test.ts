@@ -74,7 +74,9 @@ test("integration: anthropic mode produces non-empty stdout", async () => {
   }
   const out = captured.join("\n");
   expect(out).not.toMatch(/MODULE_NOT_FOUND|Cannot find module/);
-  expect(out).toContain("Sonnet");
+  // Case-insensitive: Row layout uses display_name "Sonnet 4.6", Hush uses condensed id "sonnet-4.6".
+  // This test reads the user's actual plugin config so we accept either rendering.
+  expect(out.toLowerCase()).toContain("sonnet");
 });
 
 test("integration: ollama-local mode produces non-empty stdout", async () => {

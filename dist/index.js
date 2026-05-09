@@ -889,7 +889,8 @@ function wcwidth(s) {
   }
   return w;
 }
-var ANSI_RE = /\x1b\[[0-9;]*m/g;
+var ANSI_RE = /\x1b\[[0-9;]*m|\x1b\]8;;[^\x07]*\x07/g;
+var ANSI_AT_START_RE = /^(?:\x1b\[[0-9;]*m|\x1b\]8;;[^\x07]*\x07)/;
 function visibleWidth(s) {
   return wcwidth(s.replace(ANSI_RE, ""));
 }
@@ -901,7 +902,7 @@ function truncateLine(line, max) {
   let i = 0;
   while (i < line.length && visible < max - 1) {
     const slice = line.slice(i);
-    const match = /^\x1b\[[0-9;]*m/.exec(slice);
+    const match = ANSI_AT_START_RE.exec(slice);
     if (match) {
       out += match[0];
       i += match[0].length;

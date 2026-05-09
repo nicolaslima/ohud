@@ -17,7 +17,11 @@ export function wcwidth(s: string): number {
   return w;
 }
 
-const ANSI_RE = /\x1b\[[0-9;]*m/g;
+// Matches CSI sequences (\x1b[...m for SGR/color) AND OSC 8 hyperlinks
+// (\x1b]8;;URL\x07TEXT\x1b]8;;\x07). Both must be excluded from visible-width
+// calculations so width-aware truncation does not slice mid-escape.
+const ANSI_RE = /\x1b\[[0-9;]*m|\x1b\]8;;[^\x07]*\x07/g;
+const ANSI_AT_START_RE = /^(?:\x1b\[[0-9;]*m|\x1b\]8;;[^\x07]*\x07)/;
 
 export function visibleWidth(s: string): number {
   return wcwidth(s.replace(ANSI_RE, ""));
@@ -29,9 +33,9 @@ export function truncateLine(line: string, max: number): string {
   let visible = 0;
   let i = 0;
   while (i < line.length && visible < max - 1) {
-    // Try to match ANSI escape at current position
+    // Try to match ANSI/OSC escape at current position — emit verbatim, do not count as visible
     const slice = line.slice(i);
-    const match = /^\x1b\[[0-9;]*m/.exec(slice);
+    const match = ANSI_AT_START_RE.exec(slice);
     if (match) {
       out += match[0];
       i += match[0].length;
