@@ -176,12 +176,6 @@ export interface GitStatus {
   dirty: boolean;
   ahead: number;
   behind: number;
-  fileStats?: {
-    modified: number;
-    added: number;
-    deleted: number;
-    untracked: number;
-  };
 }
 
 // === Memory (opt-in) ===
@@ -236,13 +230,9 @@ export interface HudConfig {
     showAgents: boolean;
     showTodos: boolean;
     showConfigCounts: boolean;
-    showOutputStyle: boolean;
     showDuration: boolean;
     showSpeed: boolean;
     showMemoryUsage: boolean;
-    showTokenBreakdown: boolean;
-    showSessionName: boolean;
-    showClaudeCodeVersion: boolean;
     showEffortLevel: boolean;
   };
   gitStatus: {
@@ -251,8 +241,6 @@ export interface HudConfig {
     showAheadBehind: boolean;
     pushWarningThreshold: number;
     pushCriticalThreshold: number;
-    showFileStats: boolean;
-    branchOverflow: "truncate" | "wrap";
   };
   colors: {
     context: string;

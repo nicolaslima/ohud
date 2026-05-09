@@ -31,13 +31,9 @@ export const DEFAULT_CONFIG: HudConfig = {
     showAgents: false,
     showTodos: false,
     showConfigCounts: false,
-    showOutputStyle: false,
     showDuration: false,
     showSpeed: false,
     showMemoryUsage: false,
-    showTokenBreakdown: true,
-    showSessionName: false,
-    showClaudeCodeVersion: false,
     showEffortLevel: true,
   },
   gitStatus: {
@@ -46,8 +42,6 @@ export const DEFAULT_CONFIG: HudConfig = {
     showAheadBehind: false,
     pushWarningThreshold: 0,
     pushCriticalThreshold: 0,
-    showFileStats: false,
-    branchOverflow: "truncate",
   },
   colors: {
     context: "green",
