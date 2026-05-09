@@ -1,5 +1,5 @@
 // src/doctor.ts
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,22 +7,53 @@ import { probeOllama } from "./ollama-probe.js";
 import { loadConfig } from "./config.js";
 import type { HudConfig } from "./types.js";
 
-// CONSUMED_FLAGS: flags actually read by render or orchestrator code.
-// Maintenance: regenerate by running:
-//   grep -rh "config\.display\." src --include="*.ts" | sed -E 's/.*config\.display\.([a-zA-Z]+).*/\1/' | sort -u
-//   grep -rh "config\.gitStatus\." src --include="*.ts" | sed -E 's/.*config\.gitStatus\.([a-zA-Z]+).*/\1/' | sort -u
-// (Use broader pattern "\.display\." to catch ctx.config.display.* as well.)
-// This Set will need updating after Tasks 7 (delete dead config) and 8 (implement Pilha A).
-const CONSUMED_FLAGS = new Set([
-  // Display flags read by src/render/widgets/*.ts or src/render/index.ts orchestrator
-  "showModel", "showContextBar", "contextValue", "showApiTime", "showUsage",
-  "usageBarEnabled", "usageCompact", "showResetLabel", "timeFormat", "sevenDayThreshold",
-  "externalUsagePath", "externalUsageFreshnessMs", "showCost", "showPromptCache",
-  "promptCacheTtlSeconds", "showTools", "showAgents", "showTodos", "showConfigCounts",
-  "showDuration", "showSpeed", "showMemoryUsage", "showEffortLevel", "glyphs",
-  "layout", "hush",
-  // GitStatus flags read by src/render/widgets/project.ts
-  "showAheadBehind", "pushWarningThreshold", "pushCriticalThreshold",
+// Layout affinity for each display.* flag:
+// "row"  = only consumed by RowLayout (flag is silenced in hush)
+// "hush" = only consumed by HushLayout  (flag is silenced in row — rare)
+// "both" = consumed by both layouts
+// absent = dead flag (truly unused anywhere)
+const FLAG_LAYOUT: Record<string, "row" | "hush" | "both"> = {
+  // Identity/core — rendered in both layouts
+  showModel: "both",
+  showContextBar: "both",
+  contextValue: "both",
+  showApiTime: "both",
+  showUsage: "both",
+  showEffortLevel: "both",
+  glyphs: "both",
+  layout: "both",
+  hush: "both",
+
+  // Row-only flags (silenced when layout=hush)
+  usageBarEnabled: "row",
+  usageCompact: "row",
+  showResetLabel: "row",
+  showCost: "row",
+  showMemoryUsage: "row",
+  showSpeed: "row",
+
+  // Row-preferred but hush also has a path (renderHush implemented and non-null)
+  showPromptCache: "both",
+  showTools: "both",
+  showAgents: "both",
+  showTodos: "both",
+  showDuration: "both",
+  showConfigCounts: "both",
+
+  // Advanced config flags consumed in both modes
+  timeFormat: "both",
+  sevenDayThreshold: "both",
+  warningThreshold: "both",
+  criticalThreshold: "both",
+  externalUsagePath: "both",
+  externalUsageFreshnessMs: "both",
+  promptCacheTtlSeconds: "both",
+};
+
+// gitStatus flags consumed by the project widget (used in both layouts)
+const GIT_CONSUMED = new Set([
+  "enabled", "showDirty", "showAheadBehind",
+  "pushWarningThreshold", "pushCriticalThreshold",
 ]);
 
 interface DoctorOpts {
@@ -52,7 +83,7 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
   lines.push(`cloud models: ${probe.cloudModels.map((m) => m.name).join(", ") || "(none)"}`);
   lines.push(`mode: ${(probe.daemonOk && probe.cloudModels.length > 0) ? "ollama-capable" : "anthropic"}`);
 
-  // Task C additions: active layout and mode resolution transparency.
+  // Active layout and mode resolution transparency.
   const activeLayout = cfg.display.layout ?? "row";
   lines.push(`Active layout: ${activeLayout}`);
 
@@ -66,6 +97,18 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
     `${probe.daemonOk ? "ollama" : "anthropic"}).`,
   );
 
+  // Last rendered mode from per-tick state file
+  const lastModePath = join(homedir(), ".claude/plugins/ohud/last-mode.json");
+  if (existsSync(lastModePath)) {
+    try {
+      const raw = readFileSync(lastModePath, "utf8");
+      const parsed = JSON.parse(raw) as { mode?: string; modelId?: string };
+      const modeStr = parsed.mode ?? "unknown";
+      const modelPart = parsed.modelId ? ` (model.id=${parsed.modelId})` : "";
+      lines.push(`Last rendered mode: ${modeStr}${modelPart}`);
+    } catch { /* ignore corrupt state */ }
+  }
+
   // Hush config summary when active layout is hush
   if (activeLayout === "hush") {
     const h = cfg.display.hush ?? {};
@@ -74,8 +117,15 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
     );
   }
 
+  const { annotations, warnings } = buildFlagAnnotations(cfg, activeLayout);
+
   lines.push(`\nactive config flags (consumed?):`);
-  lines.push(renderFlagAnnotations(cfg));
+  lines.push(annotations);
+
+  if (warnings.length > 0) {
+    lines.push(`\nlint warnings:`);
+    for (const w of warnings) lines.push(`  ${w}`);
+  }
 
   const errLog = join(homedir(), ".claude/plugins/ohud/last-errors.log");
   if (existsSync(errLog)) {
@@ -87,17 +137,55 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
   return lines.join("\n");
 }
 
-function renderFlagAnnotations(cfg: HudConfig): string {
+function buildFlagAnnotations(
+  cfg: HudConfig,
+  activeLayout: string,
+): { annotations: string; warnings: string[] } {
   const out: string[] = [];
+  const warnings: string[] = [];
+
   for (const [k, v] of Object.entries(cfg.display)) {
-    const tag = CONSUMED_FLAGS.has(k) ? "consumed" : "DEAD FLAG";
+    const affinity = FLAG_LAYOUT[k];
+    let tag: string;
+
+    if (!affinity) {
+      tag = "unknown flag";
+    } else if (affinity === "both") {
+      tag = "consumed in both";
+    } else if (affinity === "row") {
+      if (activeLayout === "hush") {
+        tag = "silenced — wrong layout";
+        if (v === true) {
+          warnings.push(
+            `⚠ display.${k}: true but layout=hush silences this flag — remove or switch to layout=row`,
+          );
+        }
+      } else {
+        tag = "consumed in row";
+      }
+    } else {
+      // affinity === "hush"
+      if (activeLayout === "row") {
+        tag = "silenced — wrong layout";
+        if (v === true) {
+          warnings.push(
+            `⚠ display.${k}: true but layout=row silences this flag — remove or switch to layout=hush`,
+          );
+        }
+      } else {
+        tag = "consumed in hush";
+      }
+    }
+
     out.push(`  display.${k}: ${JSON.stringify(v)} (${tag})`);
   }
+
   for (const [k, v] of Object.entries(cfg.gitStatus)) {
-    const tag = CONSUMED_FLAGS.has(k) || k === "enabled" || k === "showDirty" ? "consumed" : "DEAD FLAG";
+    const tag = GIT_CONSUMED.has(k) ? "consumed in both" : "unknown flag";
     out.push(`  gitStatus.${k}: ${JSON.stringify(v)} (${tag})`);
   }
-  return out.join("\n");
+
+  return { annotations: out.join("\n"), warnings };
 }
 
 function resolveBundlePath(): string {
@@ -116,4 +204,13 @@ function readPackageJson(): { version: string } {
     const raw = readFileSync(here, "utf8");
     return JSON.parse(raw) as { version: string };
   } catch { return { version: "unknown" }; }
+}
+
+export function writeLastModeState(mode: string, modelId?: string): void {
+  try {
+    const dir = join(homedir(), ".claude/plugins/ohud");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "last-mode.json");
+    writeFileSync(path, JSON.stringify({ mode, modelId, updatedAt: new Date().toISOString() }));
+  } catch { /* best-effort */ }
 }

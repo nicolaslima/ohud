@@ -69,3 +69,59 @@ test("doctor does NOT show Hush config summary when layout is row", async () => 
   const out = await runDoctor({ host: "http://localhost:11434", configPath: "/tmp/no-config.json" });
   expect(out).not.toMatch(/Hush config:/);
 });
+
+// Task 3: layout-aware flag classification
+
+test("doctor classifies showCost as 'consumed in row' when layout=row", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ohud-doc-"));
+  try {
+    const cfgPath = join(dir, "config.json");
+    writeFileSync(cfgPath, JSON.stringify({ display: { layout: "row", showCost: true } }));
+    const out = await runDoctor({ host: "http://localhost:11434", configPath: cfgPath });
+    expect(out).toContain("(consumed in row)");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor classifies showCost as 'silenced — wrong layout' when layout=hush and showCost=true", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ohud-doc-"));
+  try {
+    const cfgPath = join(dir, "config.json");
+    writeFileSync(cfgPath, JSON.stringify({ display: { layout: "hush", showCost: true } }));
+    const out = await runDoctor({ host: "http://localhost:11434", configPath: cfgPath });
+    expect(out).toContain("(silenced — wrong layout)");
+    expect(out).toContain("⚠ display.showCost");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor classifies layout flag as 'consumed in both'", async () => {
+  const out = await runDoctor({ host: "http://localhost:11434", configPath: "/tmp/no-config.json" });
+  expect(out).toContain("(consumed in both)");
+});
+
+test("doctor does NOT use static DEAD FLAG label anymore", async () => {
+  const out = await runDoctor({ host: "http://localhost:11434", configPath: "/tmp/no-config.json" });
+  expect(out).not.toContain("DEAD FLAG");
+});
+
+test("doctor shows explicit warning for silenced flag", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ohud-doc-"));
+  try {
+    const cfgPath = join(dir, "config.json");
+    writeFileSync(cfgPath, JSON.stringify({ display: { layout: "hush", showCost: true } }));
+    const out = await runDoctor({ host: "http://localhost:11434", configPath: cfgPath });
+    expect(out).toMatch(/⚠ display\.showCost: true but layout=hush silences this flag/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor classifies showModel as 'consumed in both' (used by both layouts)", async () => {
+  const out = await runDoctor({ host: "http://localhost:11434", configPath: "/tmp/no-config.json" });
+  // showModel is used in both row and hush — should be annotated as such
+  const match = out.match(/display\.showModel: [^\(]+\(([^)]+)\)/);
+  expect(match?.[1]).toBe("consumed in both");
+});

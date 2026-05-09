@@ -145,3 +145,48 @@ test("hush.thresholds override survives in loaded config", async () => {
   expect(c.display.hush?.thresholds?.warning).toBe(70);
   expect(c.display.hush?.thresholds?.danger).toBe(90);
 });
+
+// Task 6: parse-error logging
+
+test("parse error is written to last-errors.log when JSON is invalid", async () => {
+  const { existsSync, readFileSync, rmSync } = await import("node:fs");
+  const { homedir } = await import("node:os");
+  const errLogPath = join(homedir(), ".claude/plugins/ohud/last-errors.log");
+  // Remove log so we can confirm a fresh entry is written
+  try { rmSync(errLogPath); } catch { /* ok if not found */ }
+
+  writeFileSync(join(dir, "config.json"), "{not valid json");
+  await loadConfig(join(dir, "config.json"));
+
+  expect(existsSync(errLogPath)).toBe(true);
+  const logContent = readFileSync(errLogPath, "utf8");
+  expect(logContent).toMatch(/parse error:/);
+});
+
+test("parse error log contains config file path", async () => {
+  const { readFileSync, rmSync } = await import("node:fs");
+  const { homedir } = await import("node:os");
+  const errLogPath = join(homedir(), ".claude/plugins/ohud/last-errors.log");
+  try { rmSync(errLogPath); } catch { /* ok */ }
+
+  const cfgPath = join(dir, "config.json");
+  writeFileSync(cfgPath, "{broken");
+  await loadConfig(cfgPath);
+
+  const logContent = readFileSync(errLogPath, "utf8");
+  expect(logContent).toContain(cfgPath);
+});
+
+test("no parse error log entry when config is valid JSON", async () => {
+  const { existsSync, rmSync } = await import("node:fs");
+  const { homedir } = await import("node:os");
+  const errLogPath = join(homedir(), ".claude/plugins/ohud/last-errors.log");
+  try { rmSync(errLogPath); } catch { /* ok */ }
+
+  writeFileSync(join(dir, "config.json"), JSON.stringify({ display: { layout: "hush" } }));
+  await loadConfig(join(dir, "config.json"));
+
+  // If log was created by other tests, it shouldn't contain a parse error from this call.
+  // We verify by checking whether the log was touched at all (it shouldn't exist since we removed it).
+  expect(existsSync(errLogPath)).toBe(false);
+});

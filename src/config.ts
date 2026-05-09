@@ -1,5 +1,8 @@
 // src/config.ts
 import { readFile } from "node:fs/promises";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { HudConfig } from "./types.js";
 
 export const DEFAULT_CONFIG: HudConfig = {
@@ -39,7 +42,7 @@ export const DEFAULT_CONFIG: HudConfig = {
     showEffortLevel: true,
     glyphs: "auto",
     layout: "row",
-    hush: { compactWhenIdle: true, hyperlinks: true, animate: true },
+    hush: { compactWhenIdle: true, hyperlinks: true, animate: true, density: "compact", identityColors: false },
   },
   gitStatus: {
     enabled: true,
@@ -83,11 +86,25 @@ function deepMerge<T>(base: T, override: unknown): T {
   return result as T;
 }
 
+function logParseError(configPath: string, message: string): void {
+  try {
+    const logDir = join(homedir(), ".claude/plugins/ohud");
+    mkdirSync(logDir, { recursive: true });
+    const logPath = join(logDir, "last-errors.log");
+    const stamp = new Date().toISOString();
+    appendFileSync(logPath, `[${stamp}] parse error: ${message} (file: ${configPath})\n`);
+  } catch { /* best-effort */ }
+}
+
 export async function loadConfig(path: string): Promise<HudConfig> {
   const base = structuredClone(DEFAULT_CONFIG);
   let raw: string;
   try { raw = await readFile(path, "utf8"); } catch { return base; }
   let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { return base; }
+  try { parsed = JSON.parse(raw); } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logParseError(path, msg);
+    return base;
+  }
   return deepMerge(base, parsed);
 }

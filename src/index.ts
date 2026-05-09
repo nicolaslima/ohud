@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { readStdin } from "./stdin.js";
 import { probeOllama } from "./ollama-probe.js";
-import { runDoctor } from "./doctor.js";
+import { runDoctor, writeLastModeState } from "./doctor.js";
 import { resolveMode } from "./mode.js";
 import { parseTranscript } from "./transcript.js";
 import { getGitStatus } from "./git.js";
@@ -52,6 +52,7 @@ export async function main(): Promise<void> {
       config.gitStatus.enabled ? getGitStatus(stdin.workspace?.current_dir ?? stdin.cwd) : Promise.resolve(null),
     ]);
     const mode = resolveMode(stdin, probe);
+    writeLastModeState(mode, stdin.model?.id);
 
     let usageData = null;
     let costData = null;
