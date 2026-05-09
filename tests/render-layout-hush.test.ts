@@ -678,7 +678,8 @@ describe("hush.hyperlinks toggle", () => {
 
 describe("hush.animate toggle", () => {
   test("display.hush.animate=false omits spinner glyph but keeps cell content", () => {
-    const now = new Date("2024-01-01T00:00:00Z");
+    // Recent startTime so the ghost-tool TTL keeps the cell visible.
+    const now = new Date(Date.now() - 5_000);
     const ctx = makeCtx({
       transcript: {
         tools: [{ id: "1", name: "Edit", status: "running", startTime: now }],
@@ -698,7 +699,7 @@ describe("hush.animate toggle", () => {
   });
 
   test("display.hush.animate=true (default) renders spinner glyph for running tools", () => {
-    const now = new Date("2024-01-01T00:00:00Z");
+    const now = new Date(Date.now() - 5_000);
     const ctx = makeCtx({
       transcript: {
         tools: [{ id: "1", name: "Edit", status: "running", startTime: now }],

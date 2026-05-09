@@ -1612,6 +1612,18 @@ function computeTokensPerSecond(_ctx) {
 }
 
 // src/render/widgets/tools.ts
+var RUNNING_TIMEOUT_MS = 300000;
+var DONE_FADE_MS = 30000;
+function freshRunning(t, now) {
+  return t.status === "running" && now - t.startTime.getTime() < RUNNING_TIMEOUT_MS;
+}
+function freshDone(t, now) {
+  if (t.status !== "completed")
+    return false;
+  if (!t.endTime)
+    return true;
+  return now - t.endTime.getTime() < DONE_FADE_MS;
+}
 var toolsWidget = {
   id: "tools",
   group: "activity",
@@ -1629,8 +1641,9 @@ var toolsWidget = {
     const tools = ctx.transcript.tools;
     if (tools.length === 0)
       return null;
-    const running = tools.filter((t) => t.status === "running");
-    const done = tools.filter((t) => t.status === "completed");
+    const now = Date.now();
+    const running = tools.filter((t) => freshRunning(t, now));
+    const done = tools.filter((t) => freshDone(t, now));
     const cells = [];
     for (const g of groupByNameHush(running).values()) {
       const cappedCount = capCount(g.count);
@@ -1699,8 +1712,9 @@ function renderTools(ctx) {
   const tools = ctx.transcript.tools;
   if (tools.length === 0)
     return null;
-  const running = tools.filter((t) => t.status === "running");
-  const completed = tools.filter((t) => t.status === "completed");
+  const now = Date.now();
+  const running = tools.filter((t) => freshRunning(t, now));
+  const completed = tools.filter((t) => freshDone(t, now));
   const c = ctx.config.colors;
   const parts = [];
   for (const g of groupRunning(running).values()) {
@@ -1733,6 +1747,18 @@ function groupRunning(entries) {
 }
 
 // src/render/widgets/agents.ts
+var RUNNING_TIMEOUT_MS2 = 300000;
+var DONE_FADE_MS2 = 30000;
+function freshRunning2(a, now) {
+  return a.status === "running" && now - a.startTime.getTime() < RUNNING_TIMEOUT_MS2;
+}
+function freshDone2(a, now) {
+  if (a.status !== "completed")
+    return false;
+  if (!a.endTime)
+    return true;
+  return now - a.endTime.getTime() < DONE_FADE_MS2;
+}
 var agentsWidget = {
   id: "agents",
   group: "activity",
@@ -1750,8 +1776,9 @@ var agentsWidget = {
     const agents = ctx.transcript.agents;
     if (agents.length === 0)
       return null;
-    const running = agents.filter((a) => a.status === "running");
-    const completed = agents.filter((a) => a.status === "completed");
+    const now = Date.now();
+    const running = agents.filter((a) => freshRunning2(a, now));
+    const completed = agents.filter((a) => freshDone2(a, now));
     const cells = [];
     for (const a of running) {
       const elapsedMs = Date.now() - a.startTime.getTime();
@@ -1788,8 +1815,9 @@ function renderAgents(ctx) {
   if (agents.length === 0)
     return null;
   const c = ctx.config.colors;
-  const running = agents.filter((a) => a.status === "running");
-  const completed = agents.filter((a) => a.status === "completed");
+  const now = Date.now();
+  const running = agents.filter((a) => freshRunning2(a, now));
+  const completed = agents.filter((a) => freshDone2(a, now));
   const lines = [];
   if (running.length === 1) {
     lines.push(formatRunningAgent(running[0], ctx));

@@ -6,6 +6,22 @@ import { glyph } from "../glyphs.js";
 import { basename } from "../path.js";
 import { maxLineWidth } from "./_util.js";
 
+// Ghost-tool TTLs: a running tool with no `tool_result` after this elapsed is
+// treated as abandoned and dropped from output. A completed tool fades out this
+// long after its endTime — keeps the activity line from accreting forever.
+const RUNNING_TIMEOUT_MS = 300_000;  // 5 min
+const DONE_FADE_MS       = 30_000;   // 30 s
+
+function freshRunning(t: ToolEntry, now: number): boolean {
+  return t.status === "running" && (now - t.startTime.getTime()) < RUNNING_TIMEOUT_MS;
+}
+
+function freshDone(t: ToolEntry, now: number): boolean {
+  if (t.status !== "completed") return false;
+  if (!t.endTime) return true;  // unknown end → keep (mid-parse or partial)
+  return (now - t.endTime.getTime()) < DONE_FADE_MS;
+}
+
 interface RunningGroupHush {
   name: string;
   count: number;
@@ -30,8 +46,9 @@ export const toolsWidget: Widget = {
     const tools = ctx.transcript.tools;
     if (tools.length === 0) return null;
 
-    const running  = tools.filter((t) => t.status === "running");
-    const done     = tools.filter((t) => t.status === "completed");
+    const now      = Date.now();
+    const running  = tools.filter((t) => freshRunning(t, now));
+    const done     = tools.filter((t) => freshDone(t, now));
     const cells: HushCell[] = [];
 
     // Running tools: one HushCell per unique name group, with spinner animation
@@ -126,8 +143,9 @@ function renderTools(ctx: RenderContext): string | null {
   const tools = ctx.transcript.tools;
   if (tools.length === 0) return null;
 
-  const running = tools.filter((t) => t.status === "running");
-  const completed = tools.filter((t) => t.status === "completed");
+  const now = Date.now();
+  const running   = tools.filter((t) => freshRunning(t, now));
+  const completed = tools.filter((t) => freshDone(t, now));
   const c = ctx.config.colors;
   const parts: string[] = [];
   for (const g of groupRunning(running).values()) {

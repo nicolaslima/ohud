@@ -6,6 +6,20 @@ import { glyph } from "../glyphs.js";
 import { maxLineWidth } from "./_util.js";
 import { condenseModelId } from "./project.js";
 
+// Same ghost-agent TTL policy as tools.ts — see comments there.
+const RUNNING_TIMEOUT_MS = 300_000;  // 5 min
+const DONE_FADE_MS       = 30_000;   // 30 s
+
+function freshRunning(a: AgentEntry, now: number): boolean {
+  return a.status === "running" && (now - a.startTime.getTime()) < RUNNING_TIMEOUT_MS;
+}
+
+function freshDone(a: AgentEntry, now: number): boolean {
+  if (a.status !== "completed") return false;
+  if (!a.endTime) return true;
+  return (now - a.endTime.getTime()) < DONE_FADE_MS;
+}
+
 export const agentsWidget: Widget = {
   id: "agents",
   group: "activity",
@@ -26,8 +40,9 @@ export const agentsWidget: Widget = {
     const agents = ctx.transcript.agents;
     if (agents.length === 0) return null;
 
-    const running   = agents.filter((a) => a.status === "running");
-    const completed = agents.filter((a) => a.status === "completed");
+    const now       = Date.now();
+    const running   = agents.filter((a) => freshRunning(a, now));
+    const completed = agents.filter((a) => freshDone(a, now));
     const cells: HushCell[] = [];
 
     // Running agents: one cell per agent, with spinner animation
@@ -74,8 +89,9 @@ function renderAgents(ctx: RenderContext): string | null {
   if (agents.length === 0) return null;
   const c = ctx.config.colors;
 
-  const running = agents.filter((a) => a.status === "running");
-  const completed = agents.filter((a) => a.status === "completed");
+  const now       = Date.now();
+  const running   = agents.filter((a) => freshRunning(a, now));
+  const completed = agents.filter((a) => freshDone(a, now));
 
   const lines: string[] = [];
 

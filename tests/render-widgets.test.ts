@@ -317,6 +317,53 @@ test("tools line — single running, no target → just glyph + name", () => {
   expect(out).not.toContain(":");
 });
 
+test("tools line — running tools older than 5 min are dropped (ghost-tool timeout)", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTools = true;
+  // Stale running tools — analogous to the user's screenshot (Skill 22h, Edit 3h, Write 6h).
+  ctx.transcript.tools = [
+    { id: "1", name: "Skill", status: "running", startTime: new Date(Date.now() - 22 * 60 * 60 * 1000) },
+    { id: "2", name: "Edit",  status: "running", startTime: new Date(Date.now() - 199 * 60 * 1000) },
+    { id: "3", name: "Read",  status: "running", startTime: new Date() },  // fresh — should stay
+  ];
+  const out = renderBody(toolsWidget, ctx) ?? "";
+  expect(out).not.toContain("Skill");
+  expect(out).not.toContain("Edit");
+  expect(out).toContain("Read");
+});
+
+test("tools line — completed tools fade out 30s after endTime", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showTools = true;
+  ctx.transcript.tools = [
+    // Stale completion: ended 60s ago → faded out
+    { id: "1", name: "OldRead", status: "completed", startTime: new Date(Date.now() - 90_000), endTime: new Date(Date.now() - 60_000) },
+    // Fresh completion: ended 5s ago → still visible
+    { id: "2", name: "RecentEdit", status: "completed", startTime: new Date(Date.now() - 10_000), endTime: new Date(Date.now() - 5_000) },
+    // Missing endTime: keeps showing (graceful fallback for partial parse / tests)
+    { id: "3", name: "UnknownEnd", status: "completed", startTime: new Date() },
+  ];
+  const out = renderBody(toolsWidget, ctx) ?? "";
+  expect(out).not.toContain("OldRead");
+  expect(out).toContain("RecentEdit");
+  expect(out).toContain("UnknownEnd");
+});
+
+test("agents line — running agents older than 5 min are dropped", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showAgents = true;
+  ctx.transcript.agents = [
+    { id: "1", type: "stale-explore", status: "running", startTime: new Date(Date.now() - 10 * 60 * 1000) },
+    { id: "2", type: "fresh-explore", status: "running", startTime: new Date() },
+  ];
+  const out = renderBody(agentsWidget, ctx) ?? "";
+  expect(out).not.toContain("stale-explore");
+  expect(out).toContain("fresh-explore");
+});
+
 test("agents line shows running agent", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
