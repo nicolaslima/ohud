@@ -344,3 +344,25 @@ test("render orchestrator falls back to anthropic mode", () => {
   expect(out).toContain("Context");
   expect(out).toContain("Usage");
 });
+
+test("render returns minimum line (model name) when all renderers null", () => {
+  const stdin: StdinData = { model: { display_name: "claude" }, workspace: {} };
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showModel = false;
+  ctx.config.display.showContextBar = false;
+  ctx.config.display.showApiTime = false;
+  ctx.config.display.showUsage = false;
+  ctx.config.display.showCost = false;
+  ctx.config.display.showPromptCache = false;
+  ctx.config.display.showTools = false;
+  ctx.config.display.showAgents = false;
+  ctx.config.display.showTodos = false;
+  ctx.config.display.showDuration = false;
+  ctx.config.display.showSpeed = false;
+  ctx.config.display.showMemoryUsage = false;
+  ctx.config.display.showEffortLevel = false;
+  ctx.config.gitStatus.enabled = false;
+  const out = render(ctx);
+  expect(out.length).toBeGreaterThan(0);
+  expect(out).toContain("ohud");
+});

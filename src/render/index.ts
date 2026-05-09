@@ -60,6 +60,11 @@ export function render(ctx: RenderContext): string {
 
   const max = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
   const truncated = lines.map((l) => truncateLine(l, max));
+
+  // Fallback: if no content, return minimum sentinel
+  if (truncated.length === 0 || truncated.every((l) => l.trim() === "")) {
+    return color(ctx.config.colors.label, "ohud");
+  }
   return truncated.join("\n");
 }
 
