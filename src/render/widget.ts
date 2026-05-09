@@ -30,10 +30,14 @@ export interface WidgetCell {
 /** Minimal cell (HushLayout). */
 export interface HushCell {
   id?: string;
+  /** Sub-identifier preserved through spread-and-override in render pipelines.
+   *  Used by HushLayout to distinguish cells emitted by the same widget:
+   *  e.g. "icon", "name", "branch", "model" from projectWidget. */
+  subId?: string;
   group?: WidgetGroup;
   text: string;                              // PLAIN — no ANSI codes
   attention: "muted" | "normal" | "warning" | "danger";
-  link?: string;                             // optional OSC 8 URL (project name / branch / model)
+  link?: string;                             // optional OSC 8 URL
   animate?: "spinner" | null;               // optional animation hint: "spinner" for running activity
   /** Optional baseline color key used by HushLayout for "normal" and "muted" attention cells.
    *  When absent, "normal" attention cells render without additional color (default fg).

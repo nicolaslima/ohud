@@ -2,7 +2,7 @@
 import type { Widget, WidgetCell, HushCell } from "../widget.js";
 import type { RenderContext } from "../../types.js";
 import { color } from "../colors.js";
-import { glyph } from "../glyphs.js";
+import { glyph, iconForMode } from "../glyphs.js";
 import { basename } from "../path.js";
 import { maxLineWidth } from "./_util.js";
 
@@ -21,7 +21,19 @@ export const projectWidget: Widget = {
   renderHush(ctx: RenderContext): HushCell[] {
     const cells: HushCell[] = [];
 
-    // --- Sub-cell 1: project name (cyan, OSC 8 → file://project_dir) ---
+    // --- Sub-cell 0: brand icon (full intensity — no dim, no link) ---
+    // The icon identifies the session backend (✱ for Anthropic, 🦙 for Ollama).
+    const iconText = iconForMode(ctx.mode, ctx.config.display.glyphs);
+    if (iconText) {
+      cells.push({
+        subId: "icon",
+        group: "header",
+        text: iconText,
+        attention: "normal",
+      });
+    }
+
+    // --- Sub-cell 1: project name (no link in prose design) ---
     const projectDir = ctx.stdin.workspace?.project_dir?.trim() ?? "";
     let projectName: string;
     if (projectDir) {
@@ -32,14 +44,14 @@ export const projectWidget: Widget = {
       projectName = parts.slice(-ctx.config.pathLevels).join("/") || "ohud";
     }
     cells.push({
+      subId: "name",
       group: "header",
       text: projectName,
       attention: "normal",
       baseColor: "cyan",
-      link: projectDir ? `file://${projectDir}` : undefined,
     });
 
-    // --- Sub-cell 2: git branch (green=clean, yellow=dirty, OSC 8 → remote URL if detectable) ---
+    // --- Sub-cell 2: git branch (green=clean, yellow=dirty; no link in prose design) ---
     if (ctx.config.gitStatus.enabled && ctx.gitStatus) {
       const dirty = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty;
       const dirtyMark = dirty
@@ -47,34 +59,26 @@ export const projectWidget: Widget = {
         : "";
       const branchText = ctx.gitStatus.branch + dirtyMark;
       const attention = dirty ? "warning" : "normal";
-      const branchLink = remoteUrlToHttp(ctx.gitStatus.remoteUrl);
       cells.push({
+        subId: "branch",
         group: "header",
         text: branchText,
         attention,
         baseColor: dirty ? undefined : "green",
-        link: branchLink,
       });
     }
 
-    // --- Sub-cell 3: model id (blue, OSC 8 → Anthropic docs anchor) ---
+    // --- Sub-cell 3: model label (no link in prose design) ---
     if (ctx.config.display.showModel) {
       const rawId = ctx.stdin.model?.id ?? "";
-      // Format using the raw id (e.g. "claude-opus-4-7" → "Opus 4.7 (1M)")
-      // Prefer id over display_name because display_name may have spaces in the version
       const modelLabel = formatModelLabel(rawId);
       if (modelLabel) {
-        // Build anchor: "claude-opus-4-7" → "claude-opus-47"
-        const anchor = rawId.replace(/\./g, "");
-        const modelUrl = anchor
-          ? `https://docs.anthropic.com/en/docs/about-claude/models#${anchor}`
-          : undefined;
         cells.push({
+          subId: "model",
           group: "header",
           text: modelLabel,
           attention: "normal",
           baseColor: "blue",
-          link: modelUrl,
         });
       }
     }
@@ -276,33 +280,3 @@ export function formatModelLabel(nameOrId: string): string {
   return nameOrId.trim();
 }
 
-/** Translate a git remote URL into a browseable HTTP(S) URL.
- *
- *   git@github.com:owner/repo.git    → https://github.com/owner/repo
- *   https://github.com/owner/repo.git → https://github.com/owner/repo
- *   git@gitlab.com:owner/repo.git    → https://gitlab.com/owner/repo
- *   https://gitlab.com/owner/repo    → https://gitlab.com/owner/repo
- *
- * Returns undefined for URLs that don't match a known host pattern.
- */
-function remoteUrlToHttp(remoteUrl: string | undefined): string | undefined {
-  if (!remoteUrl) return undefined;
-  const url = remoteUrl.trim();
-  if (!url) return undefined;
-
-  // SSH form: git@host:owner/repo(.git)
-  const sshMatch = /^git@(github\.com|gitlab\.com|bitbucket\.org):(.+?)(?:\.git)?$/.exec(url);
-  if (sshMatch) {
-    const host = sshMatch[1]!;
-    const path = sshMatch[2]!;
-    return `https://${host}/${path}`;
-  }
-
-  // HTTP(S) form for known hosts: strip trailing .git
-  const httpsMatch = /^(https?:\/\/(?:github\.com|gitlab\.com|bitbucket\.org)\/[^?#]+?)(?:\.git)?\/?$/.exec(url);
-  if (httpsMatch) {
-    return httpsMatch[1]!;
-  }
-
-  return undefined;
-}

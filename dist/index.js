@@ -552,6 +552,15 @@ var projectWidget = {
   },
   renderHush(ctx) {
     const cells = [];
+    const iconText = iconForMode(ctx.mode, ctx.config.display.glyphs);
+    if (iconText) {
+      cells.push({
+        subId: "icon",
+        group: "header",
+        text: iconText,
+        attention: "normal"
+      });
+    }
     const projectDir = ctx.stdin.workspace?.project_dir?.trim() ?? "";
     let projectName;
     if (projectDir) {
@@ -562,38 +571,35 @@ var projectWidget = {
       projectName = parts.slice(-ctx.config.pathLevels).join("/") || "ohud";
     }
     cells.push({
+      subId: "name",
       group: "header",
       text: projectName,
       attention: "normal",
-      baseColor: "cyan",
-      link: projectDir ? `file://${projectDir}` : undefined
+      baseColor: "cyan"
     });
     if (ctx.config.gitStatus.enabled && ctx.gitStatus) {
       const dirty = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty;
       const dirtyMark = dirty ? ctx.config.display.glyphs === "ascii" ? " *" : " ●" : "";
       const branchText = ctx.gitStatus.branch + dirtyMark;
       const attention = dirty ? "warning" : "normal";
-      const branchLink = remoteUrlToHttp(ctx.gitStatus.remoteUrl);
       cells.push({
+        subId: "branch",
         group: "header",
         text: branchText,
         attention,
-        baseColor: dirty ? undefined : "green",
-        link: branchLink
+        baseColor: dirty ? undefined : "green"
       });
     }
     if (ctx.config.display.showModel) {
       const rawId = ctx.stdin.model?.id ?? "";
       const modelLabel = formatModelLabel(rawId);
       if (modelLabel) {
-        const anchor = rawId.replace(/\./g, "");
-        const modelUrl = anchor ? `https://docs.anthropic.com/en/docs/about-claude/models#${anchor}` : undefined;
         cells.push({
+          subId: "model",
           group: "header",
           text: modelLabel,
           attention: "normal",
-          baseColor: "blue",
-          link: modelUrl
+          baseColor: "blue"
         });
       }
     }
@@ -722,24 +728,6 @@ function formatModelLabel(nameOrId) {
   if (contextLabel)
     return `${friendlyName} (${contextLabel})`;
   return nameOrId.trim();
-}
-function remoteUrlToHttp(remoteUrl) {
-  if (!remoteUrl)
-    return;
-  const url = remoteUrl.trim();
-  if (!url)
-    return;
-  const sshMatch = /^git@(github\.com|gitlab\.com|bitbucket\.org):(.+?)(?:\.git)?$/.exec(url);
-  if (sshMatch) {
-    const host = sshMatch[1];
-    const path = sshMatch[2];
-    return `https://${host}/${path}`;
-  }
-  const httpsMatch = /^(https?:\/\/(?:github\.com|gitlab\.com|bitbucket\.org)\/[^?#]+?)(?:\.git)?\/?$/.exec(url);
-  if (httpsMatch) {
-    return httpsMatch[1];
-  }
-  return;
 }
 
 // src/doctor.ts
@@ -2331,62 +2319,36 @@ function glyphMode(config, env) {
     return "unicode";
   return "ascii";
 }
-function resolveSeparators(density, env) {
+function renderActivityCell(cell, now, mode, env, toggles) {
   const noColor = isColorDisabled(env);
-  const dot = noColor ? "·" : "\x1B[2m·\x1B[22m";
-  switch (density) {
-    case "comfortable":
-      return { within: ` ${dot} `, between: "    " };
-    case "airy":
-      return { within: "  ", between: "      " };
-    default:
-      return { within: ` ${dot} `, between: "   " };
-  }
-}
-function effectiveBaseColor(cell, toggles) {
-  if (!cell.baseColor)
-    return;
-  if (cell.group !== "header")
-    return cell.baseColor;
-  return toggles.identityColors ? cell.baseColor : undefined;
-}
-function renderCell(cell, now, mode, env, toggles) {
-  const noColor = isColorDisabled(env);
-  let text;
   if (cell.primaryText !== undefined && cell.secondaryText !== undefined) {
-    const primary = cell.primaryText;
-    const secondary = cell.secondaryText;
-    let primaryStyled = primary;
-    const color2 = effectiveBaseColor(cell, toggles);
-    if (!noColor && color2) {
-      primaryStyled = applyColor(primary, color2, env);
+    let primaryStyled = cell.primaryText;
+    if (!noColor && cell.baseColor) {
+      primaryStyled = applyColor(cell.primaryText, cell.baseColor, env);
     }
-    const secondaryStyled = dim(secondary, env);
-    text = `${primaryStyled} ${secondaryStyled}`;
+    const secondaryStyled = dim(cell.secondaryText, env);
+    let text2 = `${primaryStyled} ${secondaryStyled}`;
     if (cell.animate === "spinner" && toggles.animate) {
-      const glyph2 = spinnerFrame(toggles.motion ? now : 0, mode);
-      text = `${glyph2} ${text}`;
+      const g = spinnerFrame(toggles.motion ? now : 0, mode);
+      text2 = `${g} ${text2}`;
     }
     if (cell.link) {
-      text = link(text, cell.link, toggles.hyperlinks);
+      text2 = link(text2, cell.link, toggles.hyperlinks);
     }
-    return text;
+    return text2;
   }
-  text = cell.text;
+  let text = cell.text;
   if (cell.animate === "spinner" && toggles.animate) {
-    const glyph2 = spinnerFrame(toggles.motion ? now : 0, mode);
-    text = `${glyph2} ${text}`;
+    const g = spinnerFrame(toggles.motion ? now : 0, mode);
+    text = `${g} ${text}`;
   }
   switch (cell.attention) {
     case "muted":
-      text = applyDimColor(text, effectiveBaseColor(cell, toggles), env);
+      text = applyDimColor(text, cell.baseColor, env);
       break;
     case "normal":
-      {
-        const color2 = effectiveBaseColor(cell, toggles);
-        if (!noColor && color2)
-          text = applyColor(text, color2, env);
-      }
+      if (!noColor && cell.baseColor)
+        text = applyColor(text, cell.baseColor, env);
       break;
     case "warning":
       if (!noColor)
@@ -2401,18 +2363,6 @@ function renderCell(cell, now, mode, env, toggles) {
     text = link(text, cell.link, toggles.hyperlinks);
   }
   return text;
-}
-function joinCells(renderedPairs, seps) {
-  if (renderedPairs.length === 0)
-    return "";
-  let result = renderedPairs[0].rendered;
-  for (let i = 1;i < renderedPairs.length; i++) {
-    const prev = renderedPairs[i - 1];
-    const curr = renderedPairs[i];
-    const sep = prev.group === curr.group ? seps.within : seps.between;
-    result += sep + curr.rendered;
-  }
-  return result;
 }
 function capActivityCells(cells) {
   const running = cells.filter((c) => c.animate === "spinner");
@@ -2430,54 +2380,69 @@ function capActivityCells(cells) {
   }
   return result;
 }
-function truncateByPriority(cells, now, mode, env, toggles, seps, termWidth) {
-  const renderPairs = (cs) => cs.map((c) => ({ rendered: renderCell(c, now, mode, env, toggles), group: c.group }));
-  let result = joinCells(renderPairs(cells), seps);
-  if (stripAnsiWidth(result) <= termWidth)
-    return result;
-  const sorted = [...cells].sort((a, b) => {
-    const pa = a.priority ?? 0;
-    const pb = b.priority ?? 0;
-    return pa - pb;
-  });
-  const kept = [...sorted];
-  while (kept.length > 1) {
-    kept.shift();
-    const original = cells.filter((c) => kept.includes(c));
-    result = joinCells(renderPairs(original), seps);
-    if (stripAnsiWidth(result) <= termWidth)
-      return result;
-  }
-  return truncateLine(joinCells(renderPairs(cells.slice(0, 1)), seps), termWidth);
-}
-function packActivityLine(cells, now, mode, env, toggles, seps, termWidth) {
-  const renderPairs = (cs) => cs.map((c) => ({ rendered: renderCell(c, now, mode, env, toggles), group: c.group }));
+function packActivityLine(cells, counterText, now, mode, env, toggles, termWidth, indent, bulletSep) {
   const last = cells[cells.length - 1];
   const moreMatch = last ? /^\+(\d+) more$/.exec(last.text) : null;
   const initialMore = moreMatch ? Number.parseInt(moreMatch[1], 10) : 0;
   const main = moreMatch ? cells.slice(0, -1) : [...cells];
-  let droppedExtra = 0;
-  const build = () => {
-    const total = initialMore + droppedExtra;
-    const tail = total > 0 ? [{ text: `+${total} more`, attention: "muted", group: "activity" }] : [];
-    return joinCells(renderPairs([...main, ...tail]), seps);
+  const buildActivityStr = (cs, droppedExtra2) => {
+    const rendered = cs.map((c) => renderActivityCell(c, now, mode, env, toggles));
+    const total = initialMore + droppedExtra2;
+    if (total > 0)
+      rendered.push(dim(`+${total} more`, env));
+    let line = rendered.join(bulletSep);
+    if (counterText) {
+      line = line ? `${line}  ${counterText}` : counterText;
+    }
+    return indent + line;
   };
-  let result = build();
-  while (stripAnsiWidth(result) > termWidth && main.length > 0) {
+  let droppedExtra = 0;
+  let result = buildActivityStr(main, droppedExtra);
+  while (visibleWidth(result) > termWidth && main.length > 0) {
     main.pop();
     droppedExtra += 1;
-    result = build();
+    result = buildActivityStr(main, droppedExtra);
   }
-  if (stripAnsiWidth(result) > termWidth) {
+  if (visibleWidth(result) > termWidth) {
     result = truncateLine(result, termWidth);
   }
   return result;
 }
-function stripAnsiWidth(s) {
-  return s.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x07]*\x07[^\x1b]*\x1b\]8;;\x07/g, (m) => {
-    const inner = m.replace(/\x1b\]8;;[^\x07]*\x07/g, "").replace(/\x1b\]8;;\x07/g, "");
-    return inner;
-  }).length;
+function renderMetricsCell(cell, env) {
+  const noColor = isColorDisabled(env);
+  const text = cell.text;
+  switch (cell.attention) {
+    case "warning":
+      if (!noColor)
+        return `\x1B[33m${dim(text, env)}\x1B[39m`;
+      return text;
+    case "danger":
+      if (!noColor)
+        return `\x1B[31m${dim(text, env)}\x1B[39m`;
+      return text;
+    default:
+      return dim(text, env);
+  }
+}
+function bulletPadding(density) {
+  switch (density) {
+    case "comfortable":
+      return 2;
+    case "airy":
+      return 3;
+    default:
+      return 1;
+  }
+}
+function buildExtras(metricsCells, env, padding) {
+  if (metricsCells.length === 0)
+    return "";
+  const noColor = isColorDisabled(env);
+  const pad = " ".repeat(padding);
+  const bullet = noColor ? "•" : "\x1B[2m•\x1B[22m";
+  const sep = `${pad}${bullet}${pad}`;
+  const rendered = metricsCells.map((cell) => renderMetricsCell(cell, env));
+  return sep + rendered.join(sep);
 }
 var hushLayout = {
   name: "hush",
@@ -2486,8 +2451,12 @@ var hushLayout = {
     const now = Date.now();
     const env = process.env;
     const mode = glyphMode(config, env);
+    const noColor = isColorDisabled(env);
     const density = config.display.hush?.density ?? "compact";
-    const seps = resolveSeparators(density, env);
+    const padding = bulletPadding(density);
+    const pad = " ".repeat(padding);
+    const bullet = noColor ? "•" : "\x1B[2m•\x1B[22m";
+    const bulletSep = `${pad}${bullet}${pad}`;
     const toggles = {
       hyperlinks: config.display.hush?.hyperlinks !== false,
       animate: config.display.hush?.animate !== false,
@@ -2497,23 +2466,216 @@ var hushLayout = {
     const headerCells = hushCells.filter((c) => c.group === "header");
     const metricsCells = hushCells.filter((c) => c.group === "metrics");
     const activityCells = hushCells.filter((c) => c.group === "activity");
+    const hasStructuredHeader = headerCells.some((c) => c.subId === "icon" || c.subId === "name" || c.subId === "branch" || c.subId === "model") || metricsCells.some((c) => c.id === "context");
+    if (!hasStructuredHeader) {
+      return legacyPack(hushCells, termWidth, config, now, env, mode, toggles, bulletSep, noColor, padding, bullet);
+    }
+    const iconCell = headerCells.find((c) => c.subId === "icon");
+    const branchCell2 = headerCells.find((c) => c.subId === "branch");
+    const modelCell2 = headerCells.find((c) => c.subId === "model");
+    const contextCell = metricsCells.find((c) => c.id === "context");
+    const extrasCells = metricsCells.filter((c) => c.id !== "context");
+    const iconText = iconCell?.text ?? "";
+    const branchName = branchCell2?.text ?? "";
+    const modelLabel = modelCell2?.text ?? "";
+    const contextText = contextCell?.text ?? "";
+    const dimStr = (s) => dim(s, env);
+    const segments = [];
+    segments.push(dimStr("ohud"));
+    if (branchName) {
+      segments.push(dimStr(" on "));
+      segments.push(toggles.identityColors ? applyColor(branchName, "green", env) : dimStr(branchName));
+    }
+    if (modelLabel) {
+      segments.push(dimStr(" using "));
+      segments.push(toggles.identityColors ? applyColor(modelLabel, "blue", env) : dimStr(modelLabel));
+    }
+    if (contextText) {
+      segments.push(dimStr(" with context "));
+      const attention = contextCell?.attention ?? "muted";
+      if (attention === "warning" && !noColor) {
+        segments.push(`\x1B[33m${dimStr(contextText)}\x1B[39m`);
+      } else if (attention === "danger" && !noColor) {
+        segments.push(`\x1B[31m${dimStr(contextText)}\x1B[39m`);
+      } else {
+        segments.push(dimStr(contextText));
+      }
+      segments.push(dimStr(" used"));
+    }
+    const sentenceBody = segments.join("");
+    const sentenceStr = iconText ? `${iconText} ${sentenceBody}` : sentenceBody;
+    const extrasStr = buildExtras(extrasCells, env, padding);
     const cappedActivity = capActivityCells(activityCells);
-    const line1Cells = [...headerCells, ...metricsCells];
-    const line1 = truncateByPriority(line1Cells, now, mode, env, toggles, seps, termWidth);
-    const line2 = packActivityLine(cappedActivity, now, mode, env, toggles, seps, termWidth);
+    const totalToolCount = (() => {
+      let n = 0;
+      for (const c of cappedActivity) {
+        const moreM = /^\+(\d+) more$/.exec(c.text);
+        if (moreM) {
+          n += Number.parseInt(moreM[1], 10);
+        } else {
+          const countM = /×(\d+)/.exec(c.text);
+          n += countM ? Number.parseInt(countM[1], 10) : 1;
+        }
+      }
+      return n;
+    })();
+    const sessionFileCell = hushCells.find((c) => c.subId === "session-link");
+    const sessionFileUrl = sessionFileCell?.link;
+    let counterText = "";
+    if (cappedActivity.length > 0 && totalToolCount > 0) {
+      const counterLabel = `⌗${totalToolCount}`;
+      const raw = dimStr(counterLabel);
+      counterText = sessionFileUrl && toggles.hyperlinks ? link(raw, sessionFileUrl, true) : raw;
+    }
+    const hasActivity = cappedActivity.length > 0;
+    const indent = "  ";
     const lines = [];
-    if (line1)
-      lines.push(line1);
-    const compactWhenIdle = config.display.hush?.compactWhenIdle !== false;
-    if (compactWhenIdle) {
-      if (line2)
-        lines.push(line2);
+    const fullLine = sentenceStr + extrasStr;
+    if (!extrasStr || visibleWidth(fullLine) <= termWidth) {
+      lines.push(fullLine);
     } else {
-      lines.push(line2);
+      lines.push(sentenceStr);
+      const extrasBody = extrasStr.trimStart();
+      lines.push(indent + extrasBody);
+    }
+    if (hasActivity) {
+      const actLine = packActivityLine(cappedActivity, counterText, now, mode, env, toggles, termWidth, indent, bulletSep);
+      lines.push(actLine);
+    } else {
+      const compactWhenIdle = config.display.hush?.compactWhenIdle !== false;
+      if (!compactWhenIdle && lines.length === 1) {
+        lines.push("");
+      }
     }
     return lines;
   }
 };
+function legacyPack(hushCells, termWidth, config, now, env, mode, toggles, bulletSep, noColor, padding, bullet) {
+  const headerCells = hushCells.filter((c) => c.group === "header");
+  const metricsCells = hushCells.filter((c) => c.group === "metrics");
+  const activityCells = hushCells.filter((c) => c.group === "activity");
+  const pad = " ".repeat(padding);
+  const withinSep = `${pad}${bullet}${pad}`;
+  const betweenSpaces = padding === 1 ? 3 : padding === 2 ? 4 : 6;
+  const betweenSep = " ".repeat(betweenSpaces);
+  function renderCell(cell) {
+    const noC = isColorDisabled(env);
+    if (cell.primaryText !== undefined && cell.secondaryText !== undefined) {
+      let primaryStyled = cell.primaryText;
+      if (!noC && cell.baseColor && cell.attention === "normal") {
+        primaryStyled = applyColor(cell.primaryText, cell.baseColor, env);
+      }
+      const secondaryStyled = dim(cell.secondaryText, env);
+      let text2 = `${primaryStyled} ${secondaryStyled}`;
+      if (cell.animate === "spinner" && toggles.animate) {
+        const g = spinnerFrame(toggles.motion ? now : 0, mode);
+        text2 = `${g} ${text2}`;
+      }
+      if (cell.link)
+        text2 = link(text2, cell.link, toggles.hyperlinks);
+      return text2;
+    }
+    let text = cell.text;
+    if (cell.animate === "spinner" && toggles.animate) {
+      const g = spinnerFrame(toggles.motion ? now : 0, mode);
+      text = `${g} ${text}`;
+    }
+    const effectiveBaseColor = (() => {
+      if (!cell.baseColor)
+        return;
+      if (cell.group !== "header")
+        return cell.baseColor;
+      return toggles.identityColors ? cell.baseColor : undefined;
+    })();
+    switch (cell.attention) {
+      case "muted":
+        text = applyDimColor(text, effectiveBaseColor, env);
+        break;
+      case "normal":
+        if (!noC && effectiveBaseColor)
+          text = applyColor(text, effectiveBaseColor, env);
+        break;
+      case "warning":
+        if (!noC)
+          text = `\x1B[33m${text}${RESET_FG}`;
+        break;
+      case "danger":
+        if (!noC)
+          text = `\x1B[31m${text}${RESET_FG}`;
+        break;
+    }
+    if (cell.link)
+      text = link(text, cell.link, toggles.hyperlinks);
+    return text;
+  }
+  function joinCellsLegacy(cs) {
+    if (cs.length === 0)
+      return "";
+    let result = renderCell(cs[0]);
+    for (let i = 1;i < cs.length; i++) {
+      const prev = cs[i - 1];
+      const curr = cs[i];
+      const sep = prev.group === curr.group ? withinSep : betweenSep;
+      result += sep + renderCell(curr);
+    }
+    return result;
+  }
+  function truncateByPriority(cs) {
+    const joined = joinCellsLegacy(cs);
+    if (visibleWidth(joined) <= termWidth)
+      return joined;
+    const sorted = [...cs].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+    const kept = [...sorted];
+    while (kept.length > 1) {
+      kept.shift();
+      const original = cs.filter((c) => kept.includes(c));
+      const r = joinCellsLegacy(original);
+      if (visibleWidth(r) <= termWidth)
+        return r;
+    }
+    return truncateLine(joinCellsLegacy(cs.slice(0, 1)), termWidth);
+  }
+  const cappedActivity = capActivityCells(activityCells);
+  function packLegacyActivity() {
+    if (cappedActivity.length === 0)
+      return "";
+    const last = cappedActivity[cappedActivity.length - 1];
+    const moreMatch = last ? /^\+(\d+) more$/.exec(last.text) : null;
+    const initialMore = moreMatch ? Number.parseInt(moreMatch[1], 10) : 0;
+    const main = moreMatch ? cappedActivity.slice(0, -1) : [...cappedActivity];
+    const build = (cs, dropped) => {
+      const rendered = cs.map((c) => renderCell(c));
+      const total = initialMore + dropped;
+      if (total > 0)
+        rendered.push(dim(`+${total} more`, env));
+      return rendered.join(withinSep);
+    };
+    let droppedExtra = 0;
+    let result = build(main, droppedExtra);
+    while (visibleWidth(result) > termWidth && main.length > 0) {
+      main.pop();
+      droppedExtra += 1;
+      result = build(main, droppedExtra);
+    }
+    if (visibleWidth(result) > termWidth)
+      result = truncateLine(result, termWidth);
+    return result;
+  }
+  const line1Cells = [...headerCells, ...metricsCells];
+  const line1 = truncateByPriority(line1Cells);
+  const line2 = packLegacyActivity();
+  const lines = [];
+  if (line1)
+    lines.push(line1);
+  const compactWhenIdle = config.display.hush?.compactWhenIdle !== false;
+  if (compactWhenIdle) {
+    if (line2)
+      lines.push(line2);
+  } else {
+    lines.push(line2);
+  }
+  return lines;
+}
 
 // src/render/layout/index.ts
 var LAYOUTS = {

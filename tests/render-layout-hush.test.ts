@@ -21,6 +21,8 @@ import { contextWidget } from "../src/render/widgets/context.js";
 import { toolsWidget } from "../src/render/widgets/tools.js";
 import { agentsWidget } from "../src/render/widgets/agents.js";
 import { promptCacheWidget } from "../src/render/widgets/prompt-cache.js";
+import { renderCacheCell } from "../src/render/widgets/cache.js";
+import { renderSessionTimeCell } from "../src/render/widgets/session.js";
 import type { HushCell } from "../src/render/widget.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
@@ -139,15 +141,20 @@ describe("Idle state", () => {
     expect(plain).toContain("15%");
   });
 
-  test("within-group separator is ' · ' (compact default, dim middle dot)", () => {
+  test("sentence reads as prose: 'ohud on {branch} using {model} with context N% used'", () => {
     const ctx = makeCtx({ stdin: { context_window: { used_percentage: 15 } } });
     const cells = collectCells([projectWidget, contextWidget], ctx);
     const [line1] = hushLayout.pack(cells, 200, ctx.config);
     const plain = stripAnsi(line1!);
-    // Header sub-cells (project / branch / model) share the dim dot — group cohesion.
-    expect(plain).toContain(" · ");
-    // Cross-group boundary uses 3 spaces (no dot) — separation by absence.
-    expect(plain).toMatch(/   /);
+    // Prose sentence format: all pieces present with connector words
+    expect(plain).toContain("ohud");
+    expect(plain).toContain("on main");
+    expect(plain).toContain("using Opus 4.7 (1M)");
+    expect(plain).toContain("with context");
+    expect(plain).toContain("15%");
+    expect(plain).toContain("used");
+    // Connector words are lowercase
+    expect(plain).toMatch(/ohud on main using Opus 4\.7 \(1M\) with context 15% used/);
   });
 });
 
@@ -440,44 +447,46 @@ describe("cost and memory hidden in Hush", () => {
 
 // ---------------------------------------------------------------------------
 // Section 8: OSC 8 hyperlinks
+// In the prose layout, project/branch/model carry NO OSC 8 links.
+// The ONLY OSC 8 link appears on the ⌗N tools counter in the activity line.
 // ---------------------------------------------------------------------------
 
 describe("OSC 8 hyperlinks", () => {
-  test("project name cell has file:// link", () => {
+  test("project name cell has NO link (removed in prose design)", () => {
     const ctx = makeCtx();
     const cells = projectWidget.renderHush!(ctx) as HushCell[];
-    const nameCell = cells[0]!;
-    expect(nameCell.link).toBeDefined();
-    expect(nameCell.link!.startsWith("file://")).toBe(true);
+    // Icon cell is first (subId="icon"), project name is second (subId="name")
+    const nameCell = cells.find((c) => c.subId === "name");
+    expect(nameCell).toBeDefined();
+    expect(nameCell!.link).toBeUndefined();
   });
 
-  test("model cell has anthropic docs link", () => {
+  test("model cell has NO anthropic docs link (removed in prose design)", () => {
     const ctx = makeCtx();
     const cells = projectWidget.renderHush!(ctx) as HushCell[];
     const modelCell = cells.find((c) => c.text.includes("Opus"));
     expect(modelCell).toBeDefined();
-    expect(modelCell!.link).toBeDefined();
-    expect(modelCell!.link!).toContain("docs.anthropic.com");
+    expect(modelCell!.link).toBeUndefined();
   });
 
-  test("OSC 8 escape sequence present in pack output for project cell", () => {
+  test("prose sentence does NOT contain OSC 8 escape sequences", () => {
     const ctx = makeCtx();
-    const cells = projectWidget.renderHush!(ctx) as HushCell[];
-    const tagged = cells.map((c) => ({ ...c, group: "header" as const }));
-    const lines = hushLayout.pack(tagged, 200, ctx.config);
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
     const line1 = lines[0]!;
-    // OSC 8 = \x1b]8;;...BEL
-    expect(line1).toContain("\x1b]8;;file://");
-    expect(line1).toContain("\x07");
+    // No OSC 8 links in the prose sentence
+    expect(line1).not.toContain("\x1b]8;;file://");
   });
 
-  test("OSC 8 links still present even when NO_COLOR is set", () => {
+  test("NO_COLOR=1: sentence has no SGR codes (OSC 8 only on counter, not sentence)", () => {
     process.env.NO_COLOR = "1";
     const ctx = makeCtx();
-    const cells = projectWidget.renderHush!(ctx) as HushCell[];
-    const tagged = cells.map((c) => ({ ...c, group: "header" as const }));
-    const lines = hushLayout.pack(tagged, 200, ctx.config);
-    expect(lines[0]).toContain("\x1b]8;;");
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    // No SGR codes in sentence
+    expect(lines[0]).not.toMatch(/\x1b\[\d+m/);
+    // No OSC 8 links in sentence
+    expect(lines[0]).not.toContain("\x1b]8;;file://");
   });
 });
 
@@ -630,49 +639,52 @@ describe("Muted + baseColor combo", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Section 13: Branch OSC 8 link from remoteUrl
+// Section 13: Branch in prose sentence (no OSC 8 links on branch/model/project)
 // ---------------------------------------------------------------------------
 
-describe("Branch OSC 8 link", () => {
-  test("branch cell emits OSC 8 link when gitStatus.remoteUrl is detectable (https)", () => {
+describe("Branch in prose sentence", () => {
+  test("branch name appears in prose sentence regardless of remoteUrl", () => {
     const ctx = makeCtx();
     if (ctx.gitStatus) ctx.gitStatus.remoteUrl = "https://github.com/anthropic/ohud.git";
-    const projectCells = projectWidget.renderHush!(ctx) as HushCell[];
-    const branchCell = projectCells.find((c) => c.text.includes("main"));
-    expect(branchCell).toBeDefined();
-    expect(branchCell!.link).toBe("https://github.com/anthropic/ohud");
+    const cells = collectCells([projectWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    expect(stripAnsi(lines[0]!)).toContain("on main");
   });
 
-  test("branch cell emits OSC 8 link from SSH-form remoteUrl", () => {
+  test("branch cell has NO link (removed in prose design)", () => {
     const ctx = makeCtx();
     if (ctx.gitStatus) ctx.gitStatus.remoteUrl = "git@github.com:anthropic/ohud.git";
     const projectCells = projectWidget.renderHush!(ctx) as HushCell[];
     const branchCell = projectCells.find((c) => c.text.includes("main"));
-    expect(branchCell!.link).toBe("https://github.com/anthropic/ohud");
-  });
-
-  test("branch cell has no link when remoteUrl is missing", () => {
-    const ctx = makeCtx();
-    // gitStatus has no remoteUrl set
-    const projectCells = projectWidget.renderHush!(ctx) as HushCell[];
-    const branchCell = projectCells.find((c) => c.text.includes("main"));
+    expect(branchCell).toBeDefined();
     expect(branchCell!.link).toBeUndefined();
   });
 
-  test("branch cell has no link when remoteUrl is non-host (custom hostname)", () => {
+  test("all project cells have NO link (removed in prose design)", () => {
     const ctx = makeCtx();
-    if (ctx.gitStatus) ctx.gitStatus.remoteUrl = "git@my-internal-host:team/repo.git";
     const projectCells = projectWidget.renderHush!(ctx) as HushCell[];
-    const branchCell = projectCells.find((c) => c.text.includes("main"));
-    expect(branchCell!.link).toBeUndefined();
+    // All cells emitted by projectWidget (icon, name, branch, model) have no link
+    for (const c of projectCells) {
+      expect(c.link).toBeUndefined();
+    }
   });
 
-  test("branch link appears in pack output as OSC 8 escape sequence", () => {
+  test("dirty branch marker appears in prose sentence", () => {
+    const ctx = makeCtx();
+    if (ctx.gitStatus) ctx.gitStatus.dirty = true;
+    const cells = collectCells([projectWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const plain = stripAnsi(lines[0]!);
+    // Unicode mode: "●", ASCII mode: " *"
+    expect(plain).toMatch(/main ●|main \*/);
+  });
+
+  test("NO OSC 8 link for branch in pack output", () => {
     const ctx = makeCtx();
     if (ctx.gitStatus) ctx.gitStatus.remoteUrl = "git@github.com:anthropic/ohud.git";
     const cells = collectCells([projectWidget], ctx);
     const lines = hushLayout.pack(cells, 200, ctx.config);
-    expect(lines[0]).toContain("\x1b]8;;https://github.com/anthropic/ohud\x07");
+    expect(lines[0]).not.toContain("\x1b]8;;https://github.com/anthropic/ohud");
   });
 });
 
@@ -691,13 +703,17 @@ describe("hush.hyperlinks toggle", () => {
     expect(lines.join("\n")).not.toContain("\x1b]8;;");
   });
 
-  test("display.hush.hyperlinks=true (default) emits OSC 8", () => {
+  test("display.hush.hyperlinks=true (default): sentence has no OSC 8 (only counter would)", () => {
     const ctx = makeCtx();
     if (ctx.gitStatus) ctx.gitStatus.remoteUrl = "git@github.com:anthropic/ohud.git";
     // Don't set hyperlinks → default true via DEFAULT_CONFIG
+    // Prose sentence does NOT emit OSC 8 for project/branch/model
     const cells = collectCells([projectWidget], ctx);
     const lines = hushLayout.pack(cells, 200, ctx.config);
-    expect(lines.join("\n")).toContain("\x1b]8;;");
+    // Branch text still present in sentence
+    expect(stripAnsi(lines.join("\n"))).toContain("on main");
+    // But NO OSC 8 links in sentence (links only appear on ⌗N counter when activity exists)
+    expect(lines.join("\n")).not.toContain("\x1b]8;;https://github.com/anthropic/ohud");
   });
 });
 
@@ -879,7 +895,15 @@ describe("glyphMode env injection", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Section 15: Density — 3-tier separator system
+// Section 15: Density — bullet padding
+// The new design uses " • " (bullet) as the only separator between extras clauses.
+// Density controls the padding on each side of the bullet:
+//   compact:     1 space each side → " • "
+//   comfortable: 2 spaces each side → "  •  "
+//   airy:        3 spaces each side → "   •   "
+//
+// Legacy (raw-cell) path: same bullet separator for same-group;
+// cross-group uses spaces (3 / 4 / 6 for compact / comfortable / airy).
 // ---------------------------------------------------------------------------
 
 describe("density separators", () => {
@@ -890,32 +914,32 @@ describe("density separators", () => {
     ];
   }
 
-  test("compact density: same-group cells joined by ' · ' (dim middle dot — cohesion)", () => {
+  test("compact density: same-group cells joined by ' • ' (dim bullet)", () => {
     const ctx = makeCtx();
     ctx.config.display.hush = { density: "compact" };
     const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha · Beta");
+    expect(stripAnsi(line!)).toBe("Alpha • Beta");
   });
 
-  test("compact density: same-group dot wears dim SGR (\\x1b[2m...\\x1b[22m)", () => {
+  test("compact density: bullet wears dim SGR (\\x1b[2m•\\x1b[22m)", () => {
     const ctx = makeCtx();
     ctx.config.display.hush = { density: "compact" };
     const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
-    expect(line!).toContain("\x1b[2m·\x1b[22m");
+    expect(line!).toContain("\x1b[2m•\x1b[22m");
   });
 
-  test("compact density: cross-group cells joined by 3 spaces (boundary by absence of dot)", () => {
+  test("compact density: cross-group cells joined by 3 spaces", () => {
     const ctx = makeCtx();
     ctx.config.display.hush = { density: "compact" };
     const [line] = hushLayout.pack(makeTwoCells("header", "metrics"), 200, ctx.config);
     expect(stripAnsi(line!)).toBe("Alpha   Beta");
   });
 
-  test("comfortable density: same-group cells joined by ' · '", () => {
+  test("comfortable density: same-group cells joined by '  •  ' (2 spaces each side)", () => {
     const ctx = makeCtx();
     ctx.config.display.hush = { density: "comfortable" };
     const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha · Beta");
+    expect(stripAnsi(line!)).toBe("Alpha  •  Beta");
   });
 
   test("comfortable density: cross-group cells joined by 4 spaces", () => {
@@ -925,11 +949,11 @@ describe("density separators", () => {
     expect(stripAnsi(line!)).toBe("Alpha    Beta");
   });
 
-  test("airy density: same-group cells joined by 2 spaces", () => {
+  test("airy density: same-group cells joined by '   •   ' (3 spaces each side)", () => {
     const ctx = makeCtx();
     ctx.config.display.hush = { density: "airy" };
     const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha  Beta");
+    expect(stripAnsi(line!)).toBe("Alpha   •   Beta");
   });
 
   test("airy density: cross-group cells joined by 6 spaces", () => {
@@ -939,24 +963,28 @@ describe("density separators", () => {
     expect(stripAnsi(line!)).toBe("Alpha      Beta");
   });
 
-  test("default density (unset) behaves as compact (dim dot within group)", () => {
+  test("default density (unset) behaves as compact (' • ' bullet)", () => {
     const ctx = makeCtx();
     ctx.config.display.hush = {};
     const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha · Beta");
+    expect(stripAnsi(line!)).toBe("Alpha • Beta");
   });
 
-  test("project sub-cells (name + branch + model) all have header group → use WITHIN_SEP", () => {
+  test("project cells (prose path) produce sentence with bullet-separated extras", () => {
     const ctx = makeCtx();
-    ctx.config.display.hush = { density: "comfortable" };
-    const cells = collectCells([projectWidget], ctx);
-    expect(cells.every((c) => c.group === "header")).toBe(true);
+    ctx.config.display.hush = { density: "compact" };
+    // Use full widget set including a cache-bearing context for extras
+    ctx.stdin.context_window = {
+      ...ctx.stdin.context_window,
+      current_usage: { cache_creation_input_tokens: 100, cache_read_input_tokens: 900 },
+    };
+    const cells = collectCells([projectWidget, contextWidget], ctx);
     const [line] = hushLayout.pack(cells, 200, ctx.config);
     const plain = stripAnsi(line!);
-    // comfortable WITHIN_SEP is " · "
-    expect(plain).toContain(" · ");
-    // No 4-space BETWEEN_SEP within header sub-cells
-    expect(plain).not.toContain("    ");
+    // Prose sentence present
+    expect(plain).toContain("ohud on main");
+    // No old middle-dot within header
+    expect(plain).not.toContain(" · ");
   });
 });
 
@@ -1165,6 +1193,397 @@ describe("primaryText + secondaryText rendering", () => {
     }];
     const lines = hushLayout.pack(cells, 200, ctx.config);
     expect(stripAnsi(lines[0]!)).toBe("Edit ×2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 20: Prose layout — T4 new test cases
+// ---------------------------------------------------------------------------
+
+describe("prose sentence — anthropic icon", () => {
+  test("sentence starts with ✱ icon when mode=anthropic", () => {
+    const ctx = makeCtx();
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const [line] = hushLayout.pack(cells, 200, ctx.config);
+    // Icon is at full intensity (not dim), followed by a space
+    expect(line!.startsWith("✱ ")).toBe(true);
+  });
+
+  test("sentence starts with icon even with NO extras", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showContextBar = false;
+    const cells = collectCells([projectWidget], ctx);
+    const [line] = hushLayout.pack(cells, 200, ctx.config);
+    expect(line!.startsWith("✱ ")).toBe(true);
+  });
+
+  test("plain text (NO_COLOR) still starts with ✱ icon", () => {
+    process.env.NO_COLOR = "1";
+    const ctx = makeCtx();
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const [line] = hushLayout.pack(cells, 200, ctx.config);
+    expect(line!.startsWith("✱ ")).toBe(true);
+  });
+});
+
+describe("prose sentence — ollama icon", () => {
+  test("sentence starts with 🦙 icon when mode=ollama", () => {
+    const ctx = makeCtx();
+    (ctx as unknown as Record<string, unknown>).mode = "ollama";
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const [line] = hushLayout.pack(cells, 200, ctx.config);
+    // 🦙 is a 2-wide emoji
+    expect(line!.startsWith("🦙")).toBe(true);
+  });
+});
+
+describe("prose sentence — sentence + all extras on one line (wide terminal)", () => {
+  test("all extras appear inline when terminal is wide enough", () => {
+    const ctx = makeCtx({
+      stdin: {
+        context_window: {
+          context_window_size: 200000,
+          used_percentage: 24,
+          current_usage: { input_tokens: 0, cache_creation_input_tokens: 100, cache_read_input_tokens: 870 },
+        },
+      },
+    });
+    // Build extras: cache + session time
+    const cacheCell = renderCacheCell(ctx.stdin);
+    const sessionCell = renderSessionTimeCell(
+      { ...ctx.transcript, sessionStart: new Date(Date.now() - 5_000_000), assistantMessages: [] },
+      Date.now(),
+    );
+
+    const cells: HushCell[] = [
+      ...collectCells([projectWidget, contextWidget], ctx),
+      ...(cacheCell ? [{ ...cacheCell, id: "cache" }] : []),
+      ...(sessionCell ? [{ ...sessionCell, id: "session" }] : []),
+    ];
+    const lines = hushLayout.pack(cells, 300, ctx.config);
+    // Wide terminal — everything fits on one line
+    expect(lines.length).toBe(1);
+    const plain = stripAnsi(lines[0]!);
+    expect(plain).toContain("ohud");
+    expect(plain).toContain("with context 24% used");
+    expect(plain).toContain("cache");
+    expect(plain).toContain("session time");
+  });
+});
+
+describe("prose sentence — sentence overflows → extras wrap to line 2", () => {
+  test("extras wrap to line 2 when sentence + extras exceed termWidth", () => {
+    const ctx = makeCtx({
+      stdin: {
+        context_window: {
+          context_window_size: 200000,
+          used_percentage: 24,
+          current_usage: { input_tokens: 0, cache_creation_input_tokens: 100, cache_read_input_tokens: 870 },
+        },
+      },
+    });
+    const cacheCell = renderCacheCell(ctx.stdin);
+    const cells: HushCell[] = [
+      ...collectCells([projectWidget, contextWidget], ctx),
+      ...(cacheCell ? [{ ...cacheCell, id: "cache" }] : []),
+    ];
+    // Narrow terminal: sentence alone fits but sentence+extras does not
+    // "✱ ohud on main using Opus 4.7 (1M) with context 24% used" = ~57 chars
+    // "  • cache 87% hit" = ~18 chars → 75 total, use 60 to force wrap
+    const lines = hushLayout.pack(cells, 60, ctx.config);
+    expect(lines.length).toBe(2);
+    const line1 = stripAnsi(lines[0]!);
+    const line2 = stripAnsi(lines[1]!);
+    // Sentence on line 1
+    expect(line1).toContain("ohud");
+    expect(line1).toContain("24% used");
+    // Extras on line 2 (indented)
+    expect(lines[1]).toMatch(/^\s+/);  // starts with whitespace (indent)
+    expect(line2).toContain("cache");
+    // Extras NOT on line 1
+    expect(line1).not.toContain("cache");
+  });
+
+  test("line 2 indent is 2 spaces when extras wrap", () => {
+    const ctx = makeCtx({
+      stdin: {
+        context_window: {
+          context_window_size: 200000,
+          used_percentage: 24,
+          current_usage: { input_tokens: 0, cache_creation_input_tokens: 100, cache_read_input_tokens: 870 },
+        },
+      },
+    });
+    const cacheCell = renderCacheCell(ctx.stdin);
+    const cells: HushCell[] = [
+      ...collectCells([projectWidget, contextWidget], ctx),
+      ...(cacheCell ? [{ ...cacheCell, id: "cache" }] : []),
+    ];
+    const lines = hushLayout.pack(cells, 60, ctx.config);
+    if (lines.length >= 2) {
+      // Line 2 starts with 2 spaces (then the bullet separator)
+      const raw = lines[1]!;
+      expect(raw).toMatch(/^ {2}/);
+    }
+  });
+});
+
+describe("prose sentence — active tools → activity line with counter", () => {
+  test("activity line appears as line 2 when tools running", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showTools = true;
+    ctx.transcript.tools = [
+      { id: "t1", name: "Read", status: "running", startTime: new Date(Date.now() - 1000) },
+      { id: "t2", name: "Edit", status: "running", startTime: new Date(Date.now() - 1000) },
+    ];
+    const cells = collectCells([projectWidget, contextWidget, toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    expect(lines.length).toBe(2);
+  });
+
+  test("activity line has ⌗N counter", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showTools = true;
+    ctx.transcript.tools = [
+      { id: "t1", name: "Read", status: "running", startTime: new Date(Date.now() - 1000) },
+      { id: "t2", name: "Edit", status: "running", startTime: new Date(Date.now() - 1000) },
+    ];
+    const cells = collectCells([projectWidget, contextWidget, toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const activityPlain = stripAnsi(lines[lines.length - 1]!);
+    // Counter ⌗N at the end — N = 2 tools
+    expect(activityPlain).toContain("⌗2");
+  });
+
+  test("activity line indents 2 spaces", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showTools = true;
+    ctx.transcript.tools = [
+      { id: "t1", name: "Read", status: "running", startTime: new Date(Date.now() - 1000) },
+    ];
+    const cells = collectCells([projectWidget, contextWidget, toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const activityLine = lines[lines.length - 1]!;
+    // Activity indented with 2 spaces
+    expect(activityLine).toMatch(/^ {2}/);
+  });
+
+  test("all three lines: sentence + wrapped-extras + activity", () => {
+    const ctx = makeCtx({
+      stdin: {
+        context_window: {
+          context_window_size: 200000,
+          used_percentage: 24,
+          current_usage: { input_tokens: 0, cache_creation_input_tokens: 100, cache_read_input_tokens: 870 },
+        },
+      },
+    });
+    ctx.config.display.showTools = true;
+    ctx.transcript.tools = [
+      { id: "t1", name: "Read", status: "running", startTime: new Date(Date.now() - 1000) },
+    ];
+    const cacheCell = renderCacheCell(ctx.stdin);
+    const cells: HushCell[] = [
+      ...collectCells([projectWidget, contextWidget, toolsWidget], ctx),
+      ...(cacheCell ? [{ ...cacheCell, id: "cache" }] : []),
+    ];
+    // Narrow enough to force extras wrap but not sentence truncation
+    const lines = hushLayout.pack(cells, 60, ctx.config);
+    // Should be 3 lines: sentence, extras, activity
+    expect(lines.length).toBe(3);
+    // Line 1: sentence
+    expect(stripAnsi(lines[0]!)).toContain("ohud");
+    // Line 2: extras (indented)
+    expect(lines[1]!).toMatch(/^ {2}/);
+    expect(stripAnsi(lines[1]!)).toContain("cache");
+    // Line 3: activity (indented)
+    expect(lines[2]!).toMatch(/^ {2}/);
+    expect(stripAnsi(lines[2]!)).toContain("Read");
+  });
+});
+
+describe("prose sentence — threshold transitions", () => {
+  test("context at 59% is muted (below warning threshold of 60)", () => {
+    const ctx = makeCtx({ stdin: { context_window: { used_percentage: 59 } } });
+    const cell = contextWidget.renderHush!(ctx) as HushCell;
+    expect(cell.attention).toBe("muted");
+  });
+
+  test("context at 60% is warning (>= 60 default threshold)", () => {
+    const ctx = makeCtx({ stdin: { context_window: { used_percentage: 60 } } });
+    const cell = contextWidget.renderHush!(ctx) as HushCell;
+    expect(cell.attention).toBe("warning");
+  });
+
+  test("context at 61% is warning (> 60 default threshold)", () => {
+    const ctx = makeCtx({ stdin: { context_window: { used_percentage: 61 } } });
+    const cell = contextWidget.renderHush!(ctx) as HushCell;
+    expect(cell.attention).toBe("warning");
+  });
+
+  test("context at 61% produces yellow SGR in prose sentence", () => {
+    const ctx = makeCtx({ stdin: { context_window: { used_percentage: 61 } } });
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const [line] = hushLayout.pack(cells, 200, ctx.config);
+    expect(line).toContain("\x1b[33m");
+    expect(line).toContain("61%");
+  });
+
+  test("context at 75% is danger (>= criticalThreshold of 75)", () => {
+    const ctx = makeCtx({ stdin: { context_window: { used_percentage: 75 } } });
+    const cell = contextWidget.renderHush!(ctx) as HushCell;
+    expect(cell.attention).toBe("danger");
+  });
+
+  test("context at 75% produces red SGR in prose sentence", () => {
+    const ctx = makeCtx({ stdin: { context_window: { used_percentage: 75 } } });
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const [line] = hushLayout.pack(cells, 200, ctx.config);
+    expect(line).toContain("\x1b[31m");
+    expect(line).toContain("75%");
+  });
+
+  test("context at 74% is warning (above 60, below 75)", () => {
+    const ctx = makeCtx({ stdin: { context_window: { used_percentage: 74 } } });
+    const cell = contextWidget.renderHush!(ctx) as HushCell;
+    expect(cell.attention).toBe("warning");
+  });
+});
+
+describe("prose sentence — hyperlink only on tools counter", () => {
+  test("sentence has no OSC 8 hyperlinks", () => {
+    const ctx = makeCtx();
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    // No OSC 8 sequences in the sentence line
+    expect(lines[0]).not.toContain("\x1b]8;;");
+  });
+
+  test("activity counter ⌗N has no OSC 8 when no session-link cell", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showTools = true;
+    ctx.transcript.tools = [
+      { id: "t1", name: "Read", status: "running", startTime: new Date(Date.now() - 1000) },
+    ];
+    const cells = collectCells([projectWidget, contextWidget, toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    // Counter is plain text ⌗1 without OSC 8 (no session-link cell provided)
+    const activityPlain = stripAnsi(lines[lines.length - 1]!);
+    expect(activityPlain).toContain("⌗1");
+    // No OSC 8 since no session-link cell was injected
+    expect(lines[lines.length - 1]).not.toContain("\x1b]8;;");
+  });
+
+  test("activity counter gets OSC 8 when session-link cell is injected", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showTools = true;
+    ctx.transcript.tools = [
+      { id: "t1", name: "Edit", status: "running", startTime: new Date(Date.now() - 1000) },
+    ];
+    const activityCells = collectCells([toolsWidget], ctx);
+    // Inject session-link cell
+    const sessionLinkCell: HushCell = {
+      subId: "session-link",
+      group: "metrics",
+      text: "",
+      attention: "muted",
+      link: "file:///tmp/test-session-123.txt",
+    };
+    const allCells: HushCell[] = [
+      ...collectCells([projectWidget, contextWidget], ctx),
+      sessionLinkCell,
+      ...activityCells,
+    ];
+    const lines = hushLayout.pack(allCells, 200, ctx.config);
+    // Activity line should have OSC 8 link on the counter
+    expect(lines[lines.length - 1]).toContain("\x1b]8;;file:///tmp/test-session-123.txt\x07");
+  });
+});
+
+describe("prose sentence — density affects bullet padding", () => {
+  function makeProseCtxWithExtras() {
+    const ctx = makeCtx({
+      stdin: {
+        context_window: {
+          context_window_size: 200000,
+          used_percentage: 24,
+          current_usage: { input_tokens: 0, cache_creation_input_tokens: 100, cache_read_input_tokens: 870 },
+        },
+      },
+    });
+    const cacheCell = renderCacheCell(ctx.stdin)!;
+    const cells: HushCell[] = [
+      ...collectCells([projectWidget, contextWidget], ctx),
+      { ...cacheCell, id: "cache" },
+    ];
+    return { ctx, cells };
+  }
+
+  test("compact (default): extras separated by ' • ' (1 space each side)", () => {
+    const { ctx, cells } = makeProseCtxWithExtras();
+    ctx.config.display.hush = { density: "compact" };
+    const [line] = hushLayout.pack(cells, 300, ctx.config);
+    const plain = stripAnsi(line!);
+    // Between "used" and "cache" there should be " • " (1 space • 1 space)
+    expect(plain).toContain("used • cache");
+  });
+
+  test("comfortable: extras separated by '  •  ' (2 spaces each side)", () => {
+    const { ctx, cells } = makeProseCtxWithExtras();
+    ctx.config.display.hush = { density: "comfortable" };
+    const [line] = hushLayout.pack(cells, 300, ctx.config);
+    const plain = stripAnsi(line!);
+    expect(plain).toContain("used  •  cache");
+  });
+
+  test("airy: extras separated by '   •   ' (3 spaces each side)", () => {
+    const { ctx, cells } = makeProseCtxWithExtras();
+    ctx.config.display.hush = { density: "airy" };
+    const [line] = hushLayout.pack(cells, 300, ctx.config);
+    const plain = stripAnsi(line!);
+    expect(plain).toContain("used   •   cache");
+  });
+});
+
+describe("prose sentence — cache cell omitted on Ollama-style payload (no cache tokens)", () => {
+  test("no cache clause when cache tokens are absent", () => {
+    const ctx = makeCtx({
+      stdin: {
+        model: { id: "kimi-k2-6-262k" },
+        context_window: {
+          context_window_size: 200000,
+          used_percentage: 43,
+          // No current_usage → cache cell returns null
+        },
+      },
+    });
+    (ctx as unknown as Record<string, unknown>).mode = "ollama";
+    // No cache cell since no cache data
+    const cacheCell = renderCacheCell(ctx.stdin);
+    expect(cacheCell).toBeNull();
+
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const plain = stripAnsi(lines[0]!);
+    // Sentence still flows without cache clause
+    expect(plain).toContain("ohud");
+    expect(plain).toContain("43% used");
+    expect(plain).not.toContain("cache");
+  });
+
+  test("ollama sentence uses 🦙 icon and shows kimi model label", () => {
+    const ctx = makeCtx({
+      stdin: {
+        model: { id: "kimi-k2-6-262k" },
+        context_window: { used_percentage: 43 },
+      },
+    });
+    (ctx as unknown as Record<string, unknown>).mode = "ollama";
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const [line] = hushLayout.pack(cells, 200, ctx.config);
+    expect(line!.startsWith("🦙")).toBe(true);
+    const plain = stripAnsi(line!);
+    expect(plain).toContain("Kimi K2.6 (262K)");
   });
 });
 
