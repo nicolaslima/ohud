@@ -40,7 +40,10 @@ export function renderCacheCell(stdin: StdinData): HushCell | null {
   // total_input = all three token categories
   const total = input + creation + read;
 
-  const hitRatio = total > 0 ? read / total : (read > 0 ? 1 : 0);
+  const rawRatio = total > 0 ? read / total : (read > 0 ? 1 : 0);
+  // Clamp defensively: malformed payloads (negative input_tokens, etc.) could
+  // otherwise produce ratios outside [0, 1] and render "cache 142% hit".
+  const hitRatio = Math.max(0, Math.min(1, rawRatio));
   const pct = Math.floor(hitRatio * 100);
 
   return {

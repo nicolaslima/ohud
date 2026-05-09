@@ -78,4 +78,12 @@ describe("renderCacheCell", () => {
     // total = 500, read = 500 → 100%
     expect(cell!.text).toBe("cache 100% hit");
   });
+
+  test("clamps ratio to [0, 1] for malformed payloads (negative input_tokens)", () => {
+    // total = -50 + 0 + 200 = 150; read/total = 200/150 = 1.33 → must clamp to 100%
+    const stdin = makeStdin({ inputTokens: -50, cacheCreation: 0, cacheRead: 200 });
+    const cell = renderCacheCell(stdin);
+    expect(cell).not.toBeNull();
+    expect(cell!.text).toBe("cache 100% hit");
+  });
 });
