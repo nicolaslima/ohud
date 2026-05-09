@@ -6,11 +6,21 @@ import { probeOllama } from "./ollama-probe.js";
 import { loadConfig } from "./config.js";
 import type { HudConfig } from "./types.js";
 
+// CONSUMED_FLAGS: flags actually read by render or orchestrator code.
+// Maintenance: regenerate by running:
+//   grep -rh "config\.display\." src --include="*.ts" | sed -E 's/.*config\.display\.([a-zA-Z]+).*/\1/' | sort -u
+//   grep -rh "config\.gitStatus\." src --include="*.ts" | sed -E 's/.*config\.gitStatus\.([a-zA-Z]+).*/\1/' | sort -u
+// (Use broader pattern "\.display\." to catch ctx.config.display.* as well.)
+// This Set will need updating after Tasks 7 (delete dead config) and 8 (implement Pilha A).
 const CONSUMED_FLAGS = new Set([
-  "showModel", "showContextBar", "showApiTime", "showUsage", "showCost",
-  "showPromptCache", "showTools", "showAgents", "showTodos", "showDuration",
-  "showSpeed", "showMemoryUsage", "showEffortLevel", "showResetLabel",
-  "timeFormat", "showAheadBehind", "pushWarningThreshold", "pushCriticalThreshold",
+  // display flags read by render/ or src/ orchestrator code (empirically verified via grep)
+  "contextValue", "externalUsageFreshnessMs", "externalUsagePath",
+  "promptCacheTtlSeconds", "sevenDayThreshold",
+  "showAgents", "showApiTime", "showConfigCounts", "showContextBar", "showCost",
+  "showDuration", "showEffortLevel", "showMemoryUsage", "showModel",
+  "showPromptCache", "showSpeed", "showTodos", "showTools", "showUsage",
+  "usageBarEnabled", "usageCompact",
+  // gitStatus flags (also checked explicitly in renderFlagAnnotations: enabled, showDirty)
 ]);
 
 interface DoctorOpts {
