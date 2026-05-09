@@ -41,7 +41,13 @@ export function render(ctx: RenderContext): string {
       return c ? [{ ...c, id: w.id, group: w.group }] : [];
     });
 
-  const outputLines = layout.pack(cells, termWidth, ctx.config);
+  // Pass stdin + transcript to the layout — HushLayout uses session_id to
+  // compute the OSC 8 hyperlink target on the ⌗N counter and fires off a
+  // session summary file write so the link resolves to a real file.
+  const outputLines = layout.pack(cells, termWidth, ctx.config, {
+    stdin: ctx.stdin,
+    transcript: ctx.transcript,
+  });
 
   // Fallback: if no content, return minimum sentinel
   if (outputLines.length === 0 || outputLines.every((l) => l.trim() === "")) {

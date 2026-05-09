@@ -20,23 +20,31 @@
 //   Line 3 (activity): "  " + ▸ tool • ▹ tool … ⌗N  (when tools/agents are active)
 //
 // OSC 8 hyperlinks: ONLY on the ⌗N tools counter (activity line). No links on
-// project name, branch, or model.
+// project name, branch, or model. The counter URL is computed deterministically
+// from `stdin.session_id` provided via the LayoutContext, and points to
+// `~/.cache/ohud/sessions/{session_id}.txt`. A fire-and-forget call to
+// `writeSessionFile` ensures the file exists for the user to click into.
 //
-// Cell identification:
-//   id="icon"    → brand icon (full intensity, no dim)
-//   id="project" → [name, branch?, model?] emitted by projectWidget.renderHush
-//   id="context" → context % cell; becomes the "with context N% used" clause
-//   group="metrics" (other) → extras list
+// Cell identification (via subId — survives spread-and-override pipelines):
+//   subId="icon"   → brand icon (full intensity, no dim)
+//   subId="name"   → project name → embedded in sentence as "{name} on …"
+//   subId="branch" → git branch → "on {branch}"
+//   subId="model"  → model label → "using {model}"
+//   id="context"   → context % cell → "with context {N}% used"
+//   group="metrics" (other) → extras list (cache, tokens, session time, errors, rate)
 //   group="activity" → activity line cells
 
+import * as os from "node:os";
+import * as path from "node:path";
 import type { WidgetCell, HushCell } from "../widget.js";
-import type { Layout } from "./index.js";
-import type { HudConfig } from "../../types.js";
+import type { Layout, LayoutContext } from "./index.js";
+import type { HudConfig, ParsedTranscript } from "../../types.js";
 import { isColorDisabled } from "../colors.js";
 import { dim } from "../dim.js";
 import { spinnerFrame } from "../spinner.js";
 import { link as osc8 } from "../hyperlink.js";
 import { visibleWidth, truncateLine } from "../width.js";
+import { writeSessionFile } from "../../session-state.js";
 
 // SGR digit codes for baseline palette.
 const SGR_FG: Record<string, string> = {
@@ -107,7 +115,7 @@ function renderActivityCell(
 ): string {
   const noColor = isColorDisabled(env);
 
-  // primaryText + secondaryText path
+  // primaryText + secondaryText path (e.g. "Edit" + "×2")
   if (cell.primaryText !== undefined && cell.secondaryText !== undefined) {
     let primaryStyled = cell.primaryText;
     if (!noColor && cell.baseColor) {
@@ -195,7 +203,8 @@ function packActivityLine(
   indent: string,
   bulletSep: string,
 ): string {
-  // Detect a trailing "+N more" cell and lift its count
+  // Detect a trailing "+N more" cell and lift its count so we can re-emit
+  // a unified indicator after additional drops.
   const last = cells[cells.length - 1];
   const moreMatch = last ? /^\+(\d+) more$/.exec(last.text) : null;
   const initialMore = moreMatch ? Number.parseInt(moreMatch[1]!, 10) : 0;
@@ -223,7 +232,7 @@ function packActivityLine(
     result = buildActivityStr(main, droppedExtra);
   }
 
-  // Last resort: hard truncate
+  // Last resort: hard truncate when even an empty list overflows
   if (visibleWidth(result) > termWidth) {
     result = truncateLine(result, termWidth);
   }
@@ -232,20 +241,27 @@ function packActivityLine(
 
 /**
  * Render a single metrics cell to a dim styled string with optional threshold color.
+ * Threshold color (yellow/red) wraps the dim text — color outside dim.
+ * Muted/normal cells with a baseColor use the combined dim+color SGR
+ * (e.g. cyan promptCache cell renders as \x1b[2;36m...\x1b[22;39m).
  */
 function renderMetricsCell(cell: HushCell, env: NodeJS.ProcessEnv): string {
   const noColor = isColorDisabled(env);
   const text = cell.text;
   switch (cell.attention) {
     case "warning":
-      // Wrap dim text in yellow — threshold color goes outside dim
       if (!noColor) return `\x1b[33m${dim(text, env)}\x1b[39m`;
       return text;
     case "danger":
       if (!noColor) return `\x1b[31m${dim(text, env)}\x1b[39m`;
       return text;
+    case "normal":
+      // Normal-attention metrics cells with baseColor use full color (no dim).
+      if (!noColor && cell.baseColor) return applyColor(text, cell.baseColor, env);
+      return text;
     default:
-      return dim(text, env);
+      // muted (default) — combine dim with baseColor when present.
+      return applyDimColor(text, cell.baseColor, env);
   }
 }
 
@@ -274,6 +290,32 @@ function buildExtras(
   return sep + rendered.join(sep);
 }
 
+/**
+ * Compute the deterministic OSC 8 URL for the session summary file.
+ *   file://~/.cache/ohud/sessions/{sessionId}.txt
+ * Returns null when sessionId is missing or empty.
+ */
+function sessionFileUrl(sessionId: string | undefined): string | null {
+  if (!sessionId) return null;
+  const filePath = path.join(os.homedir(), ".cache/ohud/sessions", `${sessionId}.txt`);
+  return `file://${filePath}`;
+}
+
+/** Best-effort fire-and-forget for the session-file write. Errors are swallowed. */
+function fireSessionFileWrite(layoutCtx: LayoutContext | undefined): void {
+  const sessionId = layoutCtx?.stdin?.session_id;
+  const transcript = layoutCtx?.transcript;
+  if (!sessionId || !transcript) return;
+  // writeSessionFile types ParsedTranscript but only reads TranscriptData fields
+  // (sessionStart, tools, hasError) — safe to cast.
+  // Defensive: writeSessionFile is async; do not await — no need to block render.
+  // Errors (permission denied, disk full, etc.) are intentionally swallowed —
+  // the hyperlink target may not resolve, but the statusline output stays clean.
+  void writeSessionFile(sessionId, transcript as ParsedTranscript).catch(() => {
+    /* swallow — link-target write failures must not surface in the statusline */
+  });
+}
+
 export const hushLayout: Layout = {
   name: "hush",
 
@@ -281,6 +323,7 @@ export const hushLayout: Layout = {
     cells: (WidgetCell | HushCell)[],
     termWidth: number,
     config: HudConfig,
+    layoutCtx?: LayoutContext,
   ): string[] {
     // Only handle HushCell instances — skip WidgetCells.
     const hushCells = cells.filter((c): c is HushCell => "text" in c && "attention" in c);
@@ -292,8 +335,8 @@ export const hushLayout: Layout = {
     const density = config.display.hush?.density ?? "compact";
     const padding = bulletPadding(density);
     const pad = " ".repeat(padding);
-    const bullet = noColor ? "•" : "\x1b[2m•\x1b[22m";
-    const bulletSep = `${pad}${bullet}${pad}`;
+    const bulletGlyph = noColor ? "•" : "\x1b[2m•\x1b[22m";
+    const bulletSep = `${pad}${bulletGlyph}${pad}`;
 
     const toggles: HushToggles = {
       hyperlinks:     config.display.hush?.hyperlinks     !== false,
@@ -311,42 +354,28 @@ export const hushLayout: Layout = {
     // Identify structured header parts via subId
     // -------------------------------------------------------------------------
     // subId="icon"   → brand icon (full intensity — no dim)
-    // subId="name"   → project name
+    // subId="name"   → project name (e.g. "ohud", "myapp", "claude-code")
     // subId="branch" → git branch
     // subId="model"  → model label
     //
-    // subId survives the { ...cell, id: w.id } spread in render/index.ts because
-    // render/index.ts only overrides `id` (the widget id), not `subId`.
-    //
-    // When NO cells carry a subId (raw test cells / legacy path), fall back to
-    // the old join-with-separator approach so legacy tests remain valid.
-    const hasStructuredHeader =
-      headerCells.some((c) => c.subId === "icon" || c.subId === "name" || c.subId === "branch" || c.subId === "model") ||
-      metricsCells.some((c) => c.id === "context");
-
-    if (!hasStructuredHeader) {
-      // -----------------------------------------------------------------------
-      // LEGACY / UNSTRUCTURED path — used by raw-cell tests that don't set subId.
-      // Joins all cells with the old 3-tier separator system.
-      // This preserves Section 15/18/19 test behavior for raw-cell inputs.
-      // -----------------------------------------------------------------------
-      return legacyPack(hushCells, termWidth, config, now, env, mode, toggles, bulletSep, noColor, padding, bullet);
-    }
-
-    // -----------------------------------------------------------------------
-    // PROSE path — structured cells from project/context/etc widgets
-    // -----------------------------------------------------------------------
+    // subId survives the { ...cell, id: w.id } spread in render/index.ts
+    // because render/index.ts only overrides `id` (the widget id), not `subId`.
 
     const iconCell    = headerCells.find((c) => c.subId === "icon");
-    const branchCell2 = headerCells.find((c) => c.subId === "branch");
-    const modelCell2  = headerCells.find((c) => c.subId === "model");
+    const nameCell    = headerCells.find((c) => c.subId === "name");
+    const branchCell  = headerCells.find((c) => c.subId === "branch");
+    const modelCell   = headerCells.find((c) => c.subId === "model");
     const contextCell = metricsCells.find((c) => c.id === "context");
     // Extras: all metrics cells EXCEPT the context cell
     const extrasCells = metricsCells.filter((c) => c.id !== "context");
 
     const iconText    = iconCell?.text ?? "";
-    const branchName  = branchCell2?.text ?? "";
-    const modelLabel  = modelCell2?.text ?? "";
+    // Project name: prefer the name cell's text. Fall back to "?" only when
+    // no project widget has emitted a name cell — this surfaces the missing
+    // input rather than masking it with a hardcoded literal.
+    const projectName = nameCell?.text ?? nameCell?.primaryText ?? "?";
+    const branchName  = branchCell?.text ?? "";
+    const modelLabel  = modelCell?.text ?? "";
     const contextText = contextCell?.text ?? "";
 
     // -----------------------------------------------------------------------
@@ -357,8 +386,10 @@ export const hushLayout: Layout = {
 
     const segments: string[] = [];
 
-    // "ohud"
-    segments.push(dimStr("ohud"));
+    // "{projectName}"
+    segments.push(toggles.identityColors && nameCell?.baseColor
+      ? applyColor(projectName, nameCell.baseColor, env)
+      : dimStr(projectName));
 
     // " on {branch}"
     if (branchName) {
@@ -400,7 +431,7 @@ export const hushLayout: Layout = {
     const extrasStr = buildExtras(extrasCells, env, padding);
 
     // -----------------------------------------------------------------------
-    // Activity cells
+    // Activity cells & OSC 8 counter (production-wired)
     // -----------------------------------------------------------------------
     const cappedActivity = capActivityCells(activityCells);
 
@@ -419,20 +450,22 @@ export const hushLayout: Layout = {
       return n;
     })();
 
-    // Build OSC 8 counter: ⌗N linked to session file
-    // fire-and-forget writeSessionFile; path is predictable from session_id.
-    // Since pack() doesn't receive ctx directly, we check if any cell
-    // carries a session file link hint via subId="session-link".
-    const sessionFileCell = hushCells.find((c) => c.subId === "session-link");
-    const sessionFileUrl  = sessionFileCell?.link;
-
+    // OSC 8 counter wiring:
+    //   1. Compute file:// URL deterministically from stdin.session_id.
+    //   2. Fire-and-forget writeSessionFile so the file actually exists when
+    //      the user clicks (writes are debounced inside session-state.ts).
+    //   3. Wrap the ⌗N counter in OSC 8 via the existing hyperlink helper.
+    //      No URL → plain text fallback (link() returns text untouched).
+    const fileUrl = sessionFileUrl(layoutCtx?.stdin?.session_id);
     let counterText = "";
     if (cappedActivity.length > 0 && totalToolCount > 0) {
+      // Trigger session-file write only when we'll actually emit a counter.
+      if (fileUrl && layoutCtx?.transcript) {
+        fireSessionFileWrite(layoutCtx);
+      }
       const counterLabel = `⌗${totalToolCount}`;
-      const raw = dimStr(counterLabel);
-      counterText = sessionFileUrl && toggles.hyperlinks
-        ? osc8(raw, sessionFileUrl, true)
-        : raw;
+      const dimmed = dimStr(counterLabel);
+      counterText = osc8(dimmed, fileUrl ?? undefined, toggles.hyperlinks);
     }
 
     const hasActivity = cappedActivity.length > 0;
@@ -442,24 +475,35 @@ export const hushLayout: Layout = {
     // -----------------------------------------------------------------------
     // Width-aware layout: sentence + extras on 1 or 2 lines
     // -----------------------------------------------------------------------
+    // The sentence is suppressed entirely when no project/branch/model/context
+    // cells were provided AND no extras exist — this is the activity-only
+    // input shape. In production the projectWidget always emits cells, so the
+    // sentence is always present; this guard exists for tests and safety.
+    const hasSentenceContent =
+      iconText !== "" || nameCell != null || branchName !== "" ||
+      modelLabel !== "" || contextText !== "";
     const fullLine = sentenceStr + extrasStr;
 
-    if (!extrasStr || visibleWidth(fullLine) <= termWidth) {
-      // Everything fits (or no extras) — single line
-      lines.push(fullLine);
-    } else {
-      // Extras overflow — wrap to line 2 with indent
-      lines.push(sentenceStr);
-      // extrasStr starts with the separator (pad+bullet+pad), trim the leading pad
-      // and replace with indent so it reads: "  • cache ..."
-      const extrasBody = extrasStr.trimStart();
-      lines.push(indent + extrasBody);
+    if (hasSentenceContent || extrasStr) {
+      if (!extrasStr || visibleWidth(fullLine) <= termWidth) {
+        // Everything fits (or no extras) — single line
+        lines.push(fullLine);
+      } else {
+        // Extras overflow — wrap to line 2 with indent
+        lines.push(sentenceStr);
+        // extrasStr starts with the separator (pad+bullet+pad); strip the leading
+        // pad and replace with indent so it reads: "  • cache ..."
+        const extrasBody = extrasStr.trimStart();
+        lines.push(indent + extrasBody);
+      }
     }
 
     // -----------------------------------------------------------------------
-    // Activity line
+    // Activity line — indents 2 spaces when it follows a sentence; renders
+    // flush-left when it's the only line (no sentence content above it).
     // -----------------------------------------------------------------------
     if (hasActivity) {
+      const actIndent = lines.length > 0 ? indent : "";
       const actLine = packActivityLine(
         cappedActivity,
         counterText,
@@ -468,7 +512,7 @@ export const hushLayout: Layout = {
         env,
         toggles,
         termWidth,
-        indent,
+        actIndent,
         bulletSep,
       );
       lines.push(actLine);
@@ -483,166 +527,3 @@ export const hushLayout: Layout = {
     return lines;
   },
 };
-
-// ---------------------------------------------------------------------------
-// Legacy / unstructured pack — for raw-cell tests and backward compat
-// ---------------------------------------------------------------------------
-// This path is taken when input cells carry NO structural ids (id="project",
-// id="context", etc.). It reproduces the old 3-tier separator behavior so that
-// tests passing bare HushCell arrays without ids continue to work.
-//
-// Specifically used by:
-//   - Section 15 density separator tests (makeTwoCells)
-//   - Section 18 priority truncation tests
-//   - Section 19 primaryText+secondaryText tests
-//   - Any direct cell injection tests
-
-function legacyPack(
-  hushCells: HushCell[],
-  termWidth: number,
-  config: HudConfig,
-  now: number,
-  env: NodeJS.ProcessEnv,
-  mode: "unicode" | "ascii",
-  toggles: HushToggles,
-  bulletSep: string,
-  noColor: boolean,
-  padding: number,
-  bullet: string,
-): string[] {
-  const headerCells   = hushCells.filter((c) => c.group === "header");
-  const metricsCells  = hushCells.filter((c) => c.group === "metrics");
-  const activityCells = hushCells.filter((c) => c.group === "activity");
-
-  // Old separator system
-  const pad = " ".repeat(padding);
-  const withinSep = `${pad}${bullet}${pad}`;
-  const betweenSpaces = padding === 1 ? 3 : padding === 2 ? 4 : 6;
-  const betweenSep = " ".repeat(betweenSpaces);
-
-  // Render each cell
-  function renderCell(cell: HushCell): string {
-    const noC = isColorDisabled(env);
-
-    // primaryText + secondaryText
-    if (cell.primaryText !== undefined && cell.secondaryText !== undefined) {
-      let primaryStyled = cell.primaryText;
-      if (!noC && cell.baseColor && cell.attention === "normal") {
-        primaryStyled = applyColor(cell.primaryText, cell.baseColor, env);
-      }
-      const secondaryStyled = dim(cell.secondaryText, env);
-      let text = `${primaryStyled} ${secondaryStyled}`;
-      if (cell.animate === "spinner" && toggles.animate) {
-        const g = spinnerFrame(toggles.motion ? now : 0, mode);
-        text = `${g} ${text}`;
-      }
-      if (cell.link) text = osc8(text, cell.link, toggles.hyperlinks);
-      return text;
-    }
-
-    let text = cell.text;
-    if (cell.animate === "spinner" && toggles.animate) {
-      const g = spinnerFrame(toggles.motion ? now : 0, mode);
-      text = `${g} ${text}`;
-    }
-
-    // identityColors: suppress header cell baseColor when off
-    const effectiveBaseColor = (() => {
-      if (!cell.baseColor) return undefined;
-      if (cell.group !== "header") return cell.baseColor;
-      return toggles.identityColors ? cell.baseColor : undefined;
-    })();
-
-    switch (cell.attention) {
-      case "muted":
-        text = applyDimColor(text, effectiveBaseColor, env);
-        break;
-      case "normal":
-        if (!noC && effectiveBaseColor) text = applyColor(text, effectiveBaseColor, env);
-        break;
-      case "warning":
-        if (!noC) text = `\x1b[33m${text}${RESET_FG}`;
-        break;
-      case "danger":
-        if (!noC) text = `\x1b[31m${text}${RESET_FG}`;
-        break;
-    }
-
-    if (cell.link) text = osc8(text, cell.link, toggles.hyperlinks);
-    return text;
-  }
-
-  // Join rendered cells with group-aware separators
-  function joinCellsLegacy(cs: HushCell[]): string {
-    if (cs.length === 0) return "";
-    let result = renderCell(cs[0]!);
-    for (let i = 1; i < cs.length; i++) {
-      const prev = cs[i - 1]!;
-      const curr = cs[i]!;
-      const sep = prev.group === curr.group ? withinSep : betweenSep;
-      result += sep + renderCell(curr);
-    }
-    return result;
-  }
-
-  // Priority-aware truncation for line 1
-  function truncateByPriority(cs: HushCell[]): string {
-    const joined = joinCellsLegacy(cs);
-    if (visibleWidth(joined) <= termWidth) return joined;
-
-    const sorted = [...cs].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
-    const kept = [...sorted];
-    while (kept.length > 1) {
-      kept.shift();
-      const original = cs.filter((c) => kept.includes(c));
-      const r = joinCellsLegacy(original);
-      if (visibleWidth(r) <= termWidth) return r;
-    }
-    return truncateLine(joinCellsLegacy(cs.slice(0, 1)), termWidth);
-  }
-
-  // Cap and pack activity line
-  const cappedActivity = capActivityCells(activityCells);
-
-  function packLegacyActivity(): string {
-    if (cappedActivity.length === 0) return "";
-
-    const last = cappedActivity[cappedActivity.length - 1];
-    const moreMatch = last ? /^\+(\d+) more$/.exec(last.text) : null;
-    const initialMore = moreMatch ? Number.parseInt(moreMatch[1]!, 10) : 0;
-    const main: HushCell[] = moreMatch ? cappedActivity.slice(0, -1) : [...cappedActivity];
-
-    const build = (cs: HushCell[], dropped: number): string => {
-      const rendered = cs.map((c) => renderCell(c));
-      const total = initialMore + dropped;
-      if (total > 0) rendered.push(dim(`+${total} more`, env));
-      return rendered.join(withinSep);
-    };
-
-    let droppedExtra = 0;
-    let result = build(main, droppedExtra);
-    while (visibleWidth(result) > termWidth && main.length > 0) {
-      main.pop();
-      droppedExtra += 1;
-      result = build(main, droppedExtra);
-    }
-    if (visibleWidth(result) > termWidth) result = truncateLine(result, termWidth);
-    return result;
-  }
-
-  const line1Cells = [...headerCells, ...metricsCells];
-  const line1 = truncateByPriority(line1Cells);
-  const line2 = packLegacyActivity();
-
-  const lines: string[] = [];
-  if (line1) lines.push(line1);
-
-  const compactWhenIdle = config.display.hush?.compactWhenIdle !== false;
-  if (compactWhenIdle) {
-    if (line2) lines.push(line2);
-  } else {
-    lines.push(line2);
-  }
-
-  return lines;
-}

@@ -3,8 +3,8 @@ import { createRequire } from "node:module";
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // src/index.ts
-import { homedir as homedir4 } from "node:os";
-import { join as join5 } from "node:path";
+import { homedir as homedir6 } from "node:os";
+import { join as join7 } from "node:path";
 import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync3 } from "node:fs";
 
 // src/stdin.ts
@@ -2259,6 +2259,10 @@ var rowLayout = {
   }
 };
 
+// src/render/layout/hush.ts
+import * as os2 from "node:os";
+import * as path2 from "node:path";
+
 // src/render/dim.ts
 function dim(text, env) {
   if (isColorDisabled(env))
@@ -2273,6 +2277,66 @@ function link(text, url, enabled = true) {
   if (url.includes("\x07"))
     return text;
   return `\x1B]8;;${url}\x07${text}\x1B]8;;\x07`;
+}
+
+// src/session-state.ts
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+var DEFAULT_CACHE_DIR = path.join(os.homedir(), ".cache/ohud/sessions");
+var WRITE_DEBOUNCE_MS = 1000;
+async function writeSessionFile(sessionId, transcript, options) {
+  const cacheDir = options?.cacheDir ?? DEFAULT_CACHE_DIR;
+  const now = options?.now ?? Date.now();
+  const filePath = path.join(cacheDir, `${sessionId}.txt`);
+  try {
+    const st = await fs.stat(filePath);
+    if (Math.abs(now - st.mtimeMs) < WRITE_DEBOUNCE_MS) {
+      return filePath;
+    }
+  } catch {}
+  await fs.mkdir(cacheDir, { recursive: true });
+  const content = formatSessionFile(sessionId, transcript);
+  await fs.writeFile(filePath, content, "utf8");
+  return filePath;
+}
+function formatSessionFile(sessionId, transcript) {
+  const lines = [];
+  lines.push(`ohud session ${sessionId}`);
+  if (transcript.sessionStart) {
+    const d = transcript.sessionStart;
+    const pad = (n) => String(n).padStart(2, "0");
+    const datePart = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const timePart = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    lines.push(`started ${datePart} ${timePart}`);
+  } else {
+    lines.push("started unknown");
+  }
+  lines.push("");
+  const toolCounts = new Map;
+  for (const tool of transcript.tools) {
+    toolCounts.set(tool.name, (toolCounts.get(tool.name) ?? 0) + 1);
+  }
+  const sortedTools = [...toolCounts.entries()].sort((a, b) => b[1] - a[1]);
+  lines.push(`Tools (total: ${transcript.tools.length}):`);
+  for (const [name, count] of sortedTools) {
+    const paddedName = name.padStart(8, " ");
+    lines.push(`  ${paddedName}    ${count}`);
+  }
+  lines.push("");
+  const errorTools = transcript.tools.filter((t) => t.hasError === true);
+  lines.push(`Errors: ${errorTools.length}`);
+  if (errorTools.length > 0) {
+    for (const tool of errorTools) {
+      const ts = tool.endTime ?? tool.startTime;
+      const pad = (n) => String(n).padStart(2, "0");
+      const timeStr = `${pad(ts.getHours())}:${pad(ts.getMinutes())}:${pad(ts.getSeconds())}`;
+      lines.push(`  - ${tool.name} error at ${timeStr}`);
+    }
+  }
+  return lines.join(`
+`) + `
+`;
 }
 
 // src/render/layout/hush.ts
@@ -2420,8 +2484,12 @@ function renderMetricsCell(cell, env) {
       if (!noColor)
         return `\x1B[31m${dim(text, env)}\x1B[39m`;
       return text;
+    case "normal":
+      if (!noColor && cell.baseColor)
+        return applyColor(text, cell.baseColor, env);
+      return text;
     default:
-      return dim(text, env);
+      return applyDimColor(text, cell.baseColor, env);
   }
 }
 function bulletPadding(density) {
@@ -2444,9 +2512,22 @@ function buildExtras(metricsCells, env, padding) {
   const rendered = metricsCells.map((cell) => renderMetricsCell(cell, env));
   return sep + rendered.join(sep);
 }
+function sessionFileUrl(sessionId) {
+  if (!sessionId)
+    return null;
+  const filePath = path2.join(os2.homedir(), ".cache/ohud/sessions", `${sessionId}.txt`);
+  return `file://${filePath}`;
+}
+function fireSessionFileWrite(layoutCtx) {
+  const sessionId = layoutCtx?.stdin?.session_id;
+  const transcript = layoutCtx?.transcript;
+  if (!sessionId || !transcript)
+    return;
+  writeSessionFile(sessionId, transcript).catch(() => {});
+}
 var hushLayout = {
   name: "hush",
-  pack(cells, termWidth, config) {
+  pack(cells, termWidth, config, layoutCtx) {
     const hushCells = cells.filter((c) => ("text" in c) && ("attention" in c));
     const now = Date.now();
     const env = process.env;
@@ -2455,8 +2536,8 @@ var hushLayout = {
     const density = config.display.hush?.density ?? "compact";
     const padding = bulletPadding(density);
     const pad = " ".repeat(padding);
-    const bullet = noColor ? "•" : "\x1B[2m•\x1B[22m";
-    const bulletSep = `${pad}${bullet}${pad}`;
+    const bulletGlyph = noColor ? "•" : "\x1B[2m•\x1B[22m";
+    const bulletSep = `${pad}${bulletGlyph}${pad}`;
     const toggles = {
       hyperlinks: config.display.hush?.hyperlinks !== false,
       animate: config.display.hush?.animate !== false,
@@ -2466,22 +2547,20 @@ var hushLayout = {
     const headerCells = hushCells.filter((c) => c.group === "header");
     const metricsCells = hushCells.filter((c) => c.group === "metrics");
     const activityCells = hushCells.filter((c) => c.group === "activity");
-    const hasStructuredHeader = headerCells.some((c) => c.subId === "icon" || c.subId === "name" || c.subId === "branch" || c.subId === "model") || metricsCells.some((c) => c.id === "context");
-    if (!hasStructuredHeader) {
-      return legacyPack(hushCells, termWidth, config, now, env, mode, toggles, bulletSep, noColor, padding, bullet);
-    }
     const iconCell = headerCells.find((c) => c.subId === "icon");
-    const branchCell2 = headerCells.find((c) => c.subId === "branch");
-    const modelCell2 = headerCells.find((c) => c.subId === "model");
+    const nameCell = headerCells.find((c) => c.subId === "name");
+    const branchCell = headerCells.find((c) => c.subId === "branch");
+    const modelCell = headerCells.find((c) => c.subId === "model");
     const contextCell = metricsCells.find((c) => c.id === "context");
     const extrasCells = metricsCells.filter((c) => c.id !== "context");
     const iconText = iconCell?.text ?? "";
-    const branchName = branchCell2?.text ?? "";
-    const modelLabel = modelCell2?.text ?? "";
+    const projectName = nameCell?.text ?? nameCell?.primaryText ?? "?";
+    const branchName = branchCell?.text ?? "";
+    const modelLabel = modelCell?.text ?? "";
     const contextText = contextCell?.text ?? "";
     const dimStr = (s) => dim(s, env);
     const segments = [];
-    segments.push(dimStr("ohud"));
+    segments.push(toggles.identityColors && nameCell?.baseColor ? applyColor(projectName, nameCell.baseColor, env) : dimStr(projectName));
     if (branchName) {
       segments.push(dimStr(" on "));
       segments.push(toggles.identityColors ? applyColor(branchName, "green", env) : dimStr(branchName));
@@ -2519,27 +2598,33 @@ var hushLayout = {
       }
       return n;
     })();
-    const sessionFileCell = hushCells.find((c) => c.subId === "session-link");
-    const sessionFileUrl = sessionFileCell?.link;
+    const fileUrl = sessionFileUrl(layoutCtx?.stdin?.session_id);
     let counterText = "";
     if (cappedActivity.length > 0 && totalToolCount > 0) {
+      if (fileUrl && layoutCtx?.transcript) {
+        fireSessionFileWrite(layoutCtx);
+      }
       const counterLabel = `⌗${totalToolCount}`;
-      const raw = dimStr(counterLabel);
-      counterText = sessionFileUrl && toggles.hyperlinks ? link(raw, sessionFileUrl, true) : raw;
+      const dimmed = dimStr(counterLabel);
+      counterText = link(dimmed, fileUrl ?? undefined, toggles.hyperlinks);
     }
     const hasActivity = cappedActivity.length > 0;
     const indent = "  ";
     const lines = [];
+    const hasSentenceContent = iconText !== "" || nameCell != null || branchName !== "" || modelLabel !== "" || contextText !== "";
     const fullLine = sentenceStr + extrasStr;
-    if (!extrasStr || visibleWidth(fullLine) <= termWidth) {
-      lines.push(fullLine);
-    } else {
-      lines.push(sentenceStr);
-      const extrasBody = extrasStr.trimStart();
-      lines.push(indent + extrasBody);
+    if (hasSentenceContent || extrasStr) {
+      if (!extrasStr || visibleWidth(fullLine) <= termWidth) {
+        lines.push(fullLine);
+      } else {
+        lines.push(sentenceStr);
+        const extrasBody = extrasStr.trimStart();
+        lines.push(indent + extrasBody);
+      }
     }
     if (hasActivity) {
-      const actLine = packActivityLine(cappedActivity, counterText, now, mode, env, toggles, termWidth, indent, bulletSep);
+      const actIndent = lines.length > 0 ? indent : "";
+      const actLine = packActivityLine(cappedActivity, counterText, now, mode, env, toggles, termWidth, actIndent, bulletSep);
       lines.push(actLine);
     } else {
       const compactWhenIdle = config.display.hush?.compactWhenIdle !== false;
@@ -2550,132 +2635,6 @@ var hushLayout = {
     return lines;
   }
 };
-function legacyPack(hushCells, termWidth, config, now, env, mode, toggles, bulletSep, noColor, padding, bullet) {
-  const headerCells = hushCells.filter((c) => c.group === "header");
-  const metricsCells = hushCells.filter((c) => c.group === "metrics");
-  const activityCells = hushCells.filter((c) => c.group === "activity");
-  const pad = " ".repeat(padding);
-  const withinSep = `${pad}${bullet}${pad}`;
-  const betweenSpaces = padding === 1 ? 3 : padding === 2 ? 4 : 6;
-  const betweenSep = " ".repeat(betweenSpaces);
-  function renderCell(cell) {
-    const noC = isColorDisabled(env);
-    if (cell.primaryText !== undefined && cell.secondaryText !== undefined) {
-      let primaryStyled = cell.primaryText;
-      if (!noC && cell.baseColor && cell.attention === "normal") {
-        primaryStyled = applyColor(cell.primaryText, cell.baseColor, env);
-      }
-      const secondaryStyled = dim(cell.secondaryText, env);
-      let text2 = `${primaryStyled} ${secondaryStyled}`;
-      if (cell.animate === "spinner" && toggles.animate) {
-        const g = spinnerFrame(toggles.motion ? now : 0, mode);
-        text2 = `${g} ${text2}`;
-      }
-      if (cell.link)
-        text2 = link(text2, cell.link, toggles.hyperlinks);
-      return text2;
-    }
-    let text = cell.text;
-    if (cell.animate === "spinner" && toggles.animate) {
-      const g = spinnerFrame(toggles.motion ? now : 0, mode);
-      text = `${g} ${text}`;
-    }
-    const effectiveBaseColor = (() => {
-      if (!cell.baseColor)
-        return;
-      if (cell.group !== "header")
-        return cell.baseColor;
-      return toggles.identityColors ? cell.baseColor : undefined;
-    })();
-    switch (cell.attention) {
-      case "muted":
-        text = applyDimColor(text, effectiveBaseColor, env);
-        break;
-      case "normal":
-        if (!noC && effectiveBaseColor)
-          text = applyColor(text, effectiveBaseColor, env);
-        break;
-      case "warning":
-        if (!noC)
-          text = `\x1B[33m${text}${RESET_FG}`;
-        break;
-      case "danger":
-        if (!noC)
-          text = `\x1B[31m${text}${RESET_FG}`;
-        break;
-    }
-    if (cell.link)
-      text = link(text, cell.link, toggles.hyperlinks);
-    return text;
-  }
-  function joinCellsLegacy(cs) {
-    if (cs.length === 0)
-      return "";
-    let result = renderCell(cs[0]);
-    for (let i = 1;i < cs.length; i++) {
-      const prev = cs[i - 1];
-      const curr = cs[i];
-      const sep = prev.group === curr.group ? withinSep : betweenSep;
-      result += sep + renderCell(curr);
-    }
-    return result;
-  }
-  function truncateByPriority(cs) {
-    const joined = joinCellsLegacy(cs);
-    if (visibleWidth(joined) <= termWidth)
-      return joined;
-    const sorted = [...cs].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
-    const kept = [...sorted];
-    while (kept.length > 1) {
-      kept.shift();
-      const original = cs.filter((c) => kept.includes(c));
-      const r = joinCellsLegacy(original);
-      if (visibleWidth(r) <= termWidth)
-        return r;
-    }
-    return truncateLine(joinCellsLegacy(cs.slice(0, 1)), termWidth);
-  }
-  const cappedActivity = capActivityCells(activityCells);
-  function packLegacyActivity() {
-    if (cappedActivity.length === 0)
-      return "";
-    const last = cappedActivity[cappedActivity.length - 1];
-    const moreMatch = last ? /^\+(\d+) more$/.exec(last.text) : null;
-    const initialMore = moreMatch ? Number.parseInt(moreMatch[1], 10) : 0;
-    const main = moreMatch ? cappedActivity.slice(0, -1) : [...cappedActivity];
-    const build = (cs, dropped) => {
-      const rendered = cs.map((c) => renderCell(c));
-      const total = initialMore + dropped;
-      if (total > 0)
-        rendered.push(dim(`+${total} more`, env));
-      return rendered.join(withinSep);
-    };
-    let droppedExtra = 0;
-    let result = build(main, droppedExtra);
-    while (visibleWidth(result) > termWidth && main.length > 0) {
-      main.pop();
-      droppedExtra += 1;
-      result = build(main, droppedExtra);
-    }
-    if (visibleWidth(result) > termWidth)
-      result = truncateLine(result, termWidth);
-    return result;
-  }
-  const line1Cells = [...headerCells, ...metricsCells];
-  const line1 = truncateByPriority(line1Cells);
-  const line2 = packLegacyActivity();
-  const lines = [];
-  if (line1)
-    lines.push(line1);
-  const compactWhenIdle = config.display.hush?.compactWhenIdle !== false;
-  if (compactWhenIdle) {
-    if (line2)
-      lines.push(line2);
-  } else {
-    lines.push(line2);
-  }
-  return lines;
-}
 
 // src/render/layout/index.ts
 var LAYOUTS = {
@@ -2704,7 +2663,10 @@ function render(ctx) {
     const c = w.render(ctx);
     return c ? [{ ...c, id: w.id, group: w.group }] : [];
   });
-  const outputLines = layout.pack(cells, termWidth, ctx.config);
+  const outputLines = layout.pack(cells, termWidth, ctx.config, {
+    stdin: ctx.stdin,
+    transcript: ctx.transcript
+  });
   if (outputLines.length === 0 || outputLines.every((l) => l.trim() === "")) {
     return color(ctx.config.colors.label, "ohud");
   }
@@ -2713,8 +2675,8 @@ function render(ctx) {
 }
 
 // src/index.ts
-var CONFIG_PATH = join5(homedir4(), ".claude/plugins/ohud/config.json");
-mkdirSync3(join5(homedir4(), ".claude/plugins/ohud"), { recursive: true });
+var CONFIG_PATH = join7(homedir6(), ".claude/plugins/ohud/config.json");
+mkdirSync3(join7(homedir6(), ".claude/plugins/ohud"), { recursive: true });
 async function main() {
   const T0 = process.hrtime.bigint();
   const profile = process.env.OHUD_PROFILE === "1";
@@ -2780,7 +2742,7 @@ async function main() {
     const msg = err instanceof Error ? err.message : String(err);
     console.log("\x1B[31mohud: error — see /ohud doctor or ~/.claude/plugins/ohud/last-errors.log\x1B[0m");
     try {
-      const logPath = join5(homedir4(), ".claude/plugins/ohud/last-errors.log");
+      const logPath = join7(homedir6(), ".claude/plugins/ohud/last-errors.log");
       const stamp = new Date().toISOString();
       const line = `[${stamp}] ${msg}
 `;

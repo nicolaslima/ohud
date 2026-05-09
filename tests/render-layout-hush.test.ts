@@ -895,98 +895,14 @@ describe("glyphMode env injection", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Section 15: Density — bullet padding
-// The new design uses " • " (bullet) as the only separator between extras clauses.
-// Density controls the padding on each side of the bullet:
-//   compact:     1 space each side → " • "
-//   comfortable: 2 spaces each side → "  •  "
-//   airy:        3 spaces each side → "   •   "
+// Section 15: REMOVED — legacy raw-cell density tests
 //
-// Legacy (raw-cell) path: same bullet separator for same-group;
-// cross-group uses spaces (3 / 4 / 6 for compact / comfortable / airy).
+// The prose layout has no concept of "raw header cells joined by separator"
+// or "cross-group cell separator". Density now ONLY controls bullet padding
+// between extras clauses. Tests for that behavior live in the dedicated
+// "prose sentence — density affects bullet padding" describe block (Section
+// 21) which exercises real metrics cells, not synthetic raw cells.
 // ---------------------------------------------------------------------------
-
-describe("density separators", () => {
-  function makeTwoCells(groupA: string, groupB: string): HushCell[] {
-    return [
-      { text: "Alpha", attention: "normal", group: groupA as import("../src/render/widget.js").WidgetGroup },
-      { text: "Beta",  attention: "normal", group: groupB as import("../src/render/widget.js").WidgetGroup },
-    ];
-  }
-
-  test("compact density: same-group cells joined by ' • ' (dim bullet)", () => {
-    const ctx = makeCtx();
-    ctx.config.display.hush = { density: "compact" };
-    const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha • Beta");
-  });
-
-  test("compact density: bullet wears dim SGR (\\x1b[2m•\\x1b[22m)", () => {
-    const ctx = makeCtx();
-    ctx.config.display.hush = { density: "compact" };
-    const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
-    expect(line!).toContain("\x1b[2m•\x1b[22m");
-  });
-
-  test("compact density: cross-group cells joined by 3 spaces", () => {
-    const ctx = makeCtx();
-    ctx.config.display.hush = { density: "compact" };
-    const [line] = hushLayout.pack(makeTwoCells("header", "metrics"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha   Beta");
-  });
-
-  test("comfortable density: same-group cells joined by '  •  ' (2 spaces each side)", () => {
-    const ctx = makeCtx();
-    ctx.config.display.hush = { density: "comfortable" };
-    const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha  •  Beta");
-  });
-
-  test("comfortable density: cross-group cells joined by 4 spaces", () => {
-    const ctx = makeCtx();
-    ctx.config.display.hush = { density: "comfortable" };
-    const [line] = hushLayout.pack(makeTwoCells("header", "metrics"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha    Beta");
-  });
-
-  test("airy density: same-group cells joined by '   •   ' (3 spaces each side)", () => {
-    const ctx = makeCtx();
-    ctx.config.display.hush = { density: "airy" };
-    const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha   •   Beta");
-  });
-
-  test("airy density: cross-group cells joined by 6 spaces", () => {
-    const ctx = makeCtx();
-    ctx.config.display.hush = { density: "airy" };
-    const [line] = hushLayout.pack(makeTwoCells("header", "metrics"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha      Beta");
-  });
-
-  test("default density (unset) behaves as compact (' • ' bullet)", () => {
-    const ctx = makeCtx();
-    ctx.config.display.hush = {};
-    const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha • Beta");
-  });
-
-  test("project cells (prose path) produce sentence with bullet-separated extras", () => {
-    const ctx = makeCtx();
-    ctx.config.display.hush = { density: "compact" };
-    // Use full widget set including a cache-bearing context for extras
-    ctx.stdin.context_window = {
-      ...ctx.stdin.context_window,
-      current_usage: { cache_creation_input_tokens: 100, cache_read_input_tokens: 900 },
-    };
-    const cells = collectCells([projectWidget, contextWidget], ctx);
-    const [line] = hushLayout.pack(cells, 200, ctx.config);
-    const plain = stripAnsi(line!);
-    // Prose sentence present
-    expect(plain).toContain("ohud on main");
-    // No old middle-dot within header
-    expect(plain).not.toContain(" · ");
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Section 16: identityColors toggle
@@ -1105,61 +1021,13 @@ describe("activity cell cap", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Section 18: Priority-aware truncation
+// Section 18: REMOVED — priority-aware sentence truncation
+//
+// The prose layout never truncates sentence content. The full sentence is
+// always emitted; when it doesn't fit alongside extras, extras wrap to line 2.
+// The `priority` field on HushCells is now used only by the activity-line
+// drop logic ("+N more" overflow), not by the sentence path.
 // ---------------------------------------------------------------------------
-
-describe("priority-aware truncation", () => {
-  test("low-priority cell dropped before high-priority when line overflows", () => {
-    const ctx = makeCtx();
-    const cells: HushCell[] = [
-      { text: "project-name", attention: "normal", group: "header",  priority: 100 },
-      { text: "metric-low",   attention: "normal", group: "metrics", priority: 10 },
-    ];
-    // Narrow terminal that can fit "project-name" (12) but not both with 2-space sep (26)
-    const lines = hushLayout.pack(cells, 14, ctx.config);
-    const plain = stripAnsi(lines[0]!);
-    expect(plain).toContain("project-name");
-    expect(plain).not.toContain("metric-low");
-  });
-
-  test("header cell survives when lower-priority metrics overflow", () => {
-    const ctx = makeCtx();
-    const cells: HushCell[] = [
-      { text: "ohud",      attention: "normal", group: "header",  priority: 100 },
-      { text: "usage-pct", attention: "normal", group: "metrics", priority: 40 },
-      { text: "api-time",  attention: "normal", group: "metrics", priority: 50 },
-    ];
-    const lines = hushLayout.pack(cells, 10, ctx.config);
-    const plain = stripAnsi(lines[0]!);
-    expect(plain).toContain("ohud");
-  });
-
-  test("higher-priority metric kept over lower-priority metric", () => {
-    const ctx = makeCtx();
-    const cells: HushCell[] = [
-      { text: "ohud", attention: "normal", group: "header",  priority: 100 },
-      { text: "low",  attention: "normal", group: "metrics", priority: 30 },
-      { text: "high", attention: "normal", group: "metrics", priority: 80 },
-    ];
-    // Width fits "ohud  high" (10) but not all three with separators (ohud+2+low+2+high=19)
-    const lines = hushLayout.pack(cells, 12, ctx.config);
-    const plain = stripAnsi(lines[0]!);
-    expect(plain).not.toContain("low");
-    expect(plain).toContain("high");
-  });
-
-  test("all cells fit → no truncation, all content present", () => {
-    const ctx = makeCtx();
-    const cells: HushCell[] = [
-      { text: "A", attention: "normal", group: "header",  priority: 100 },
-      { text: "B", attention: "normal", group: "metrics", priority: 50 },
-    ];
-    const lines = hushLayout.pack(cells, 200, ctx.config);
-    const plain = stripAnsi(lines[0]!);
-    expect(plain).toContain("A");
-    expect(plain).toContain("B");
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Section 19: primaryText + secondaryText rendering
@@ -1192,7 +1060,11 @@ describe("primaryText + secondaryText rendering", () => {
       group: "activity",
     }];
     const lines = hushLayout.pack(cells, 200, ctx.config);
-    expect(stripAnsi(lines[0]!)).toBe("Edit ×2");
+    // Activity line always appends a ⌗N counter (N derived from cell counts).
+    // The cell text "Edit ×2" yields a count of 2, so the counter renders ⌗2.
+    const plain = stripAnsi(lines[0]!);
+    expect(plain).toContain("Edit ×2");
+    expect(plain).toMatch(/⌗\d+/);
   });
 });
 
@@ -1234,6 +1106,46 @@ describe("prose sentence — ollama icon", () => {
     const [line] = hushLayout.pack(cells, 200, ctx.config);
     // 🦙 is a 2-wide emoji
     expect(line!.startsWith("🦙")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 22: FIX 1 — project name is read from the name cell, not hardcoded
+// ---------------------------------------------------------------------------
+
+describe("prose sentence — project name is dynamic", () => {
+  test("renders project name 'myapp' when project_dir basename is 'myapp'", () => {
+    const ctx = makeCtx({
+      stdin: {
+        workspace: { current_dir: "/home/user/myapp", project_dir: "/home/user/myapp" },
+      },
+    });
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const [line] = hushLayout.pack(cells, 200, ctx.config);
+    const plain = stripAnsi(line!);
+    expect(plain).toContain("myapp on main");
+    // Confirm the literal "ohud" is NOT injected when the project isn't ohud
+    expect(plain).not.toContain("ohud on");
+  });
+
+  test("renders project name 'claude-code' for that project_dir", () => {
+    const ctx = makeCtx({
+      stdin: {
+        workspace: { current_dir: "/Users/x/code/claude-code", project_dir: "/Users/x/code/claude-code" },
+      },
+    });
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const [line] = hushLayout.pack(cells, 200, ctx.config);
+    const plain = stripAnsi(line!);
+    expect(plain).toContain("claude-code on main");
+  });
+
+  test("renders 'ohud' when the project_dir basename happens to be ohud", () => {
+    const ctx = makeCtx(); // default project_dir is /Users/lima/Projects/ohud
+    const cells = collectCells([projectWidget, contextWidget], ctx);
+    const [line] = hushLayout.pack(cells, 200, ctx.config);
+    const plain = stripAnsi(line!);
+    expect(plain).toContain("ohud on main");
   });
 });
 
@@ -1459,44 +1371,64 @@ describe("prose sentence — hyperlink only on tools counter", () => {
     expect(lines[0]).not.toContain("\x1b]8;;");
   });
 
-  test("activity counter ⌗N has no OSC 8 when no session-link cell", () => {
+  test("activity counter ⌗N has no OSC 8 when no LayoutContext is passed", () => {
     const ctx = makeCtx();
     ctx.config.display.showTools = true;
     ctx.transcript.tools = [
       { id: "t1", name: "Read", status: "running", startTime: new Date(Date.now() - 1000) },
     ];
     const cells = collectCells([projectWidget, contextWidget, toolsWidget], ctx);
+    // Pass NO layoutCtx — pack() can't compute the file:// URL without session_id
     const lines = hushLayout.pack(cells, 200, ctx.config);
-    // Counter is plain text ⌗1 without OSC 8 (no session-link cell provided)
     const activityPlain = stripAnsi(lines[lines.length - 1]!);
     expect(activityPlain).toContain("⌗1");
-    // No OSC 8 since no session-link cell was injected
     expect(lines[lines.length - 1]).not.toContain("\x1b]8;;");
   });
 
-  test("activity counter gets OSC 8 when session-link cell is injected", () => {
-    const ctx = makeCtx();
+  test("activity counter gets OSC 8 file:// link when LayoutContext provides session_id", () => {
+    const ctx = makeCtx({
+      stdin: {
+        session_id: "test-session-abc-123",
+        context_window: { used_percentage: 15 },
+      },
+    });
     ctx.config.display.showTools = true;
     ctx.transcript.tools = [
       { id: "t1", name: "Edit", status: "running", startTime: new Date(Date.now() - 1000) },
     ];
-    const activityCells = collectCells([toolsWidget], ctx);
-    // Inject session-link cell
-    const sessionLinkCell: HushCell = {
-      subId: "session-link",
-      group: "metrics",
-      text: "",
-      attention: "muted",
-      link: "file:///tmp/test-session-123.txt",
-    };
-    const allCells: HushCell[] = [
-      ...collectCells([projectWidget, contextWidget], ctx),
-      sessionLinkCell,
-      ...activityCells,
+    const cells = collectCells([projectWidget, contextWidget, toolsWidget], ctx);
+    // Pass LayoutContext with session_id — pack() must compute the URL itself
+    const lines = hushLayout.pack(cells, 200, ctx.config, {
+      stdin: ctx.stdin,
+      transcript: ctx.transcript,
+    });
+    const activityLine = lines[lines.length - 1]!;
+    // The OSC 8 sequence is present on the counter, with the deterministic path
+    expect(activityLine).toContain("\x1b]8;;file://");
+    expect(activityLine).toContain("test-session-abc-123.txt");
+  });
+
+  test("OSC 8 link suppressed when hush.hyperlinks=false even with session_id", () => {
+    const ctx = makeCtx({
+      stdin: {
+        session_id: "test-session-xyz",
+        context_window: { used_percentage: 15 },
+      },
+    });
+    ctx.config.display.showTools = true;
+    ctx.config.display.hush = { hyperlinks: false };
+    ctx.transcript.tools = [
+      { id: "t1", name: "Edit", status: "running", startTime: new Date(Date.now() - 1000) },
     ];
-    const lines = hushLayout.pack(allCells, 200, ctx.config);
-    // Activity line should have OSC 8 link on the counter
-    expect(lines[lines.length - 1]).toContain("\x1b]8;;file:///tmp/test-session-123.txt\x07");
+    const cells = collectCells([projectWidget, contextWidget, toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config, {
+      stdin: ctx.stdin,
+      transcript: ctx.transcript,
+    });
+    // Counter still present but no OSC 8 escape
+    const plain = stripAnsi(lines[lines.length - 1]!);
+    expect(plain).toContain("⌗1");
+    expect(lines[lines.length - 1]).not.toContain("\x1b]8;;");
   });
 });
 
