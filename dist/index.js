@@ -978,8 +978,63 @@ var projectWidget = {
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    const cells = [];
+    const projectDir = ctx.stdin.workspace?.project_dir?.trim() ?? "";
+    let projectName;
+    if (projectDir) {
+      projectName = basename(projectDir) || projectDir;
+    } else {
+      const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd ?? "";
+      const parts = dir.split("/").filter(Boolean);
+      projectName = parts.slice(-ctx.config.pathLevels).join("/") || "ohud";
+    }
+    cells.push({
+      group: "header",
+      text: projectName,
+      attention: "normal",
+      baseColor: "cyan",
+      link: projectDir ? `file://${projectDir}` : undefined
+    });
+    if (ctx.config.gitStatus.enabled && ctx.gitStatus) {
+      const dirty = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty;
+      const branchText = ctx.gitStatus.branch + (dirty ? "*" : "");
+      const attention = dirty ? "warning" : "normal";
+      cells.push({
+        group: "header",
+        text: branchText,
+        attention,
+        baseColor: dirty ? undefined : "green"
+      });
+    }
+    if (ctx.config.display.showModel) {
+      const rawId = ctx.stdin.model?.id ?? "";
+      const modelLabel = condenseModelId(rawId);
+      if (modelLabel) {
+        const anchor = rawId.replace(/\./g, "");
+        const modelUrl = anchor ? `https://docs.anthropic.com/en/docs/about-claude/models#${anchor}` : undefined;
+        cells.push({
+          group: "header",
+          text: modelLabel,
+          attention: "normal",
+          baseColor: "blue",
+          link: modelUrl
+        });
+      }
+    }
+    return cells;
   }
 };
+function condenseModelId(nameOrId) {
+  let s = nameOrId.trim();
+  if (s.toLowerCase().startsWith("claude-"))
+    s = s.slice(7);
+  else if (s.toLowerCase().startsWith("claude "))
+    s = s.slice(7);
+  s = s.replace(/(\d)-(\d)/g, "$1.$2").toLowerCase();
+  return s;
+}
 
 // src/render/thresholds.ts
 function barColorForPercent(pct, palette, thresholds = { warning: 60, critical: 75 }) {
@@ -1042,6 +1097,22 @@ var contextWidget = {
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    if (!ctx.config.display.showContextBar)
+      return null;
+    const pct = ctx.stdin.context_window?.used_percentage;
+    if (typeof pct !== "number" || !Number.isFinite(pct))
+      return null;
+    const rounded = Math.round(pct);
+    const warn = ctx.config.display.warningThreshold;
+    const crit = ctx.config.display.criticalThreshold;
+    const attention = rounded >= crit ? "danger" : rounded >= warn ? "warning" : "muted";
+    return {
+      group: "metrics",
+      text: `${rounded}%`,
+      attention
+    };
   }
 };
 
@@ -1081,8 +1152,30 @@ var apiTimeWidget = {
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    if (ctx.mode !== "ollama")
+      return null;
+    if (!ctx.config.display.showApiTime)
+      return null;
+    const ms = ctx.stdin.cost?.total_api_duration_ms;
+    if (typeof ms !== "number" || ms <= 0)
+      return null;
+    const attention = ms >= 1500 ? "danger" : ms >= 500 ? "warning" : ms >= 100 ? "normal" : "muted";
+    return {
+      group: "metrics",
+      text: formatApiTime(ms),
+      attention
+    };
   }
 };
+function formatApiTime(ms) {
+  if (ms >= 1000) {
+    const s = (ms / 1000).toFixed(1);
+    return `${s}s`;
+  }
+  return `${Math.round(ms)}ms`;
+}
 
 // src/render/lines/usage.ts
 var BAR_WIDTH2 = 10;
@@ -1160,6 +1253,36 @@ var usageWidget = {
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    if (ctx.mode !== "anthropic")
+      return null;
+    if (!ctx.config.display.showUsage)
+      return null;
+    if (!ctx.usageData)
+      return null;
+    const { fiveHour, sevenDay } = ctx.usageData;
+    const warn = ctx.config.display.warningThreshold;
+    const crit = ctx.config.display.criticalThreshold;
+    const fiveHourPct = fiveHour ?? 0;
+    const sevenDayPct = sevenDay ?? 0;
+    if (fiveHourPct < 50 && sevenDayPct < 50)
+      return null;
+    const parts = [];
+    if (fiveHour !== null)
+      parts.push(`5h ${fiveHour}%`);
+    if (sevenDay !== null && sevenDay >= ctx.config.display.sevenDayThreshold) {
+      parts.push(`7d ${sevenDay}%`);
+    }
+    if (parts.length === 0)
+      return null;
+    const maxPct = Math.max(fiveHourPct, sevenDayPct);
+    const attention = maxPct >= crit ? "danger" : maxPct >= warn ? "warning" : maxPct >= 50 ? "normal" : "muted";
+    return {
+      group: "metrics",
+      text: parts.join(" "),
+      attention
+    };
   }
 };
 
@@ -1189,6 +1312,9 @@ var costWidget = {
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(_ctx) {
+    return null;
   }
 };
 
@@ -1223,6 +1349,7 @@ function renderPromptCache(ctx) {
 }
 
 // src/render/widgets/prompt-cache.ts
+var MIN_REMAINING_MS = 60000;
 var promptCacheWidget = {
   id: "promptCache",
   group: "metrics",
@@ -1233,6 +1360,21 @@ var promptCacheWidget = {
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    if (ctx.mode !== "anthropic")
+      return null;
+    if (!ctx.config.display.showPromptCache)
+      return null;
+    const remaining = promptCacheRemainingMs(ctx.transcript.lastAssistantResponseAt, ctx.config.display.promptCacheTtlSeconds);
+    if (remaining === null || remaining < MIN_REMAINING_MS)
+      return null;
+    return {
+      group: "metrics",
+      text: `cache ${formatPromptCache(remaining)}`,
+      attention: "muted",
+      baseColor: "cyan"
+    };
   }
 };
 
@@ -1272,6 +1414,9 @@ var memoryWidget = {
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(_ctx) {
+    return null;
   }
 };
 
@@ -1308,6 +1453,9 @@ function computeTokensPerSecond(_ctx) {
 }
 
 // src/render/widgets/duration.ts
+var DURATION_WARNING_MS = 8 * 60 * 60 * 1000;
+var DURATION_DANGER_MS = 12 * 60 * 60 * 1000;
+var DURATION_NORMAL_MS = 4 * 60 * 60 * 1000;
 var durationWidget = {
   id: "duration",
   group: "metrics",
@@ -1318,8 +1466,32 @@ var durationWidget = {
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    if (!ctx.config.display.showDuration && !ctx.config.display.showSpeed)
+      return null;
+    const ms = ctx.stdin.cost?.total_duration_ms;
+    if (typeof ms !== "number" || ms <= 0)
+      return null;
+    const text = formatDurationHush(ms);
+    const attention = ms >= DURATION_DANGER_MS ? "danger" : ms >= DURATION_WARNING_MS ? "warning" : ms >= DURATION_NORMAL_MS ? "normal" : "muted";
+    return {
+      group: "metrics",
+      text,
+      attention
+    };
   }
 };
+function formatDurationHush(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor(totalSec % 3600 / 60);
+  if (h > 0 && m > 0)
+    return `${h}h ${m}m`;
+  if (h > 0)
+    return `${h}h`;
+  return `${m}m`;
+}
 
 // src/render/lines/tools.ts
 function renderTools(ctx) {
@@ -1378,8 +1550,56 @@ var toolsWidget = {
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    if (!ctx.config.display.showTools)
+      return null;
+    const tools = ctx.transcript.tools;
+    if (tools.length === 0)
+      return null;
+    const running = tools.filter((t) => t.status === "running");
+    const done = tools.filter((t) => t.status === "completed");
+    const cells = [];
+    for (const g of groupByName(running).values()) {
+      const countSuffix = g.count > 1 ? ` ×${g.count}` : "";
+      cells.push({
+        group: "activity",
+        text: `${g.name}${countSuffix}`,
+        attention: "normal",
+        baseColor: "cyan",
+        animate: "spinner"
+      });
+    }
+    const tally = countByName2(done);
+    for (const [name, count] of tally) {
+      const countSuffix = count > 1 ? ` ×${count}` : "";
+      cells.push({
+        group: "activity",
+        text: `✓ ${name}${countSuffix}`,
+        attention: "muted",
+        baseColor: "green"
+      });
+    }
+    return cells.length > 0 ? cells : null;
   }
 };
+function groupByName(entries) {
+  const out = new Map;
+  for (const t of entries) {
+    const existing = out.get(t.name);
+    if (existing)
+      existing.count += 1;
+    else
+      out.set(t.name, { name: t.name, count: 1 });
+  }
+  return out;
+}
+function countByName2(entries) {
+  const m = new Map;
+  for (const e of entries)
+    m.set(e.name, (m.get(e.name) ?? 0) + 1);
+  return m;
+}
 
 // src/render/lines/agents.ts
 function renderAgents(ctx) {
@@ -1441,8 +1661,45 @@ var agentsWidget = {
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    if (!ctx.config.display.showAgents)
+      return null;
+    const agents = ctx.transcript.agents;
+    if (agents.length === 0)
+      return null;
+    const running = agents.filter((a) => a.status === "running");
+    const completed = agents.filter((a) => a.status === "completed");
+    const cells = [];
+    for (const a of running) {
+      const modelTag = a.model ? ` [${a.model}]` : "";
+      cells.push({
+        group: "activity",
+        text: `${a.type}${modelTag}`,
+        attention: "normal",
+        baseColor: "cyan",
+        animate: "spinner"
+      });
+    }
+    const tally = countByType2(completed);
+    for (const [type, count] of tally) {
+      const countSuffix = count > 1 ? ` ×${count}` : "";
+      cells.push({
+        group: "activity",
+        text: `✓ ${type}${countSuffix}`,
+        attention: "muted",
+        baseColor: "green"
+      });
+    }
+    return cells.length > 0 ? cells : null;
   }
 };
+function countByType2(entries) {
+  const m = new Map;
+  for (const e of entries)
+    m.set(e.type, (m.get(e.type) ?? 0) + 1);
+  return m;
+}
 
 // src/render/lines/todos.ts
 function renderTodos(ctx) {
@@ -1470,6 +1727,19 @@ var todosWidget = {
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    if (!ctx.config.display.showTodos)
+      return null;
+    const todos = ctx.transcript.todos;
+    const inProgress = todos.find((t) => t.status === "in_progress");
+    if (!inProgress)
+      return null;
+    return {
+      group: "activity",
+      text: `▸ ${inProgress.content}`,
+      attention: "warning"
+    };
   }
 };
 
@@ -1552,6 +1822,9 @@ var environmentWidget = {
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(_ctx) {
+    return null;
   }
 };
 
@@ -1658,10 +1931,132 @@ var rowLayout = {
   }
 };
 
+// src/render/dim.ts
+function dim(text, env) {
+  const e = env ?? process.env;
+  if (e.NO_COLOR !== undefined && e.NO_COLOR !== "" || e.TERM === "dumb") {
+    return text;
+  }
+  return `\x1B[2m${text}\x1B[22m`;
+}
+
+// src/render/spinner.ts
+var UNICODE_FRAMES = ["◐", "◓", "◑", "◒"];
+var ASCII_FRAMES = ["|", "/", "-", "\\"];
+function spinnerFrame(now, mode) {
+  const idx = Math.floor(now / 1000) % 4;
+  return mode === "ascii" ? ASCII_FRAMES[idx] : UNICODE_FRAMES[idx];
+}
+
+// src/render/hyperlink.ts
+function link(text, url, enabled = true) {
+  if (!enabled || !url)
+    return text;
+  return `\x1B]8;;${url}\x07${text}\x1B]8;;\x07`;
+}
+
+// src/render/layout/hush.ts
+var SEP = "  ";
+var COLORS = {
+  cyan: "\x1B[36m",
+  green: "\x1B[32m",
+  blue: "\x1B[34m",
+  magenta: "\x1B[35m",
+  yellow: "\x1B[33m",
+  red: "\x1B[31m"
+};
+var RESET_FG = "\x1B[39m";
+function colorDisabled2(env) {
+  if (env.NO_COLOR !== undefined && env.NO_COLOR !== "")
+    return true;
+  if (env.TERM === "dumb")
+    return true;
+  return false;
+}
+function applyColor(text, colorName, env) {
+  if (colorDisabled2(env))
+    return text;
+  const code = COLORS[colorName];
+  if (!code)
+    return text;
+  return `${code}${text}${RESET_FG}`;
+}
+function glyphMode(config) {
+  const g = config.display.glyphs;
+  if (g === "unicode")
+    return "unicode";
+  if (g === "ascii")
+    return "ascii";
+  const lang = process.env.LANG ?? "";
+  if (lang.includes("UTF-8") || lang.toLowerCase().includes("utf8"))
+    return "unicode";
+  if (process.env.LC_ALL?.includes("UTF-8"))
+    return "unicode";
+  return "ascii";
+}
+function renderCell(cell, now, mode, env) {
+  let text = cell.text;
+  if (cell.animate === "spinner") {
+    const glyph2 = spinnerFrame(now, mode);
+    text = `${glyph2} ${text}`;
+  }
+  const noColor = colorDisabled2(env);
+  switch (cell.attention) {
+    case "muted":
+      text = dim(text, env);
+      break;
+    case "normal":
+      if (!noColor && cell.baseColor) {
+        text = applyColor(text, cell.baseColor, env);
+      }
+      break;
+    case "warning":
+      if (!noColor)
+        text = `\x1B[33m${text}${RESET_FG}`;
+      break;
+    case "danger":
+      if (!noColor)
+        text = `\x1B[31m${text}${RESET_FG}`;
+      break;
+  }
+  if (cell.link) {
+    text = link(text, cell.link, true);
+  }
+  return text;
+}
+var hushLayout = {
+  name: "hush",
+  pack(cells, termWidth, config) {
+    const hushCells = cells.filter((c) => ("text" in c) && ("attention" in c));
+    const now = Date.now();
+    const mode = glyphMode(config);
+    const env = process.env;
+    const headerCells = hushCells.filter((c) => c.group === "header");
+    const metricsCells = hushCells.filter((c) => c.group === "metrics");
+    const activityCells = hushCells.filter((c) => c.group === "activity");
+    const line1Parts = [...headerCells, ...metricsCells].map((c) => renderCell(c, now, mode, env));
+    const line1 = line1Parts.join(SEP);
+    const line2Parts = activityCells.map((c) => renderCell(c, now, mode, env));
+    const line2 = line2Parts.join(SEP);
+    const lines = [];
+    if (line1)
+      lines.push(truncateLine(line1, termWidth));
+    const compact = config.display.hush?.compactWhenIdle;
+    const compactWhenIdle = compact !== false;
+    if (compactWhenIdle) {
+      if (line2)
+        lines.push(truncateLine(line2, termWidth));
+    } else {
+      lines.push(truncateLine(line2, termWidth));
+    }
+    return lines;
+  }
+};
+
 // src/render/layout/index.ts
 var LAYOUTS = {
   row: rowLayout,
-  hush: rowLayout
+  hush: hushLayout
 };
 
 // src/render/index.ts

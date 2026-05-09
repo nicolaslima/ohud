@@ -12,8 +12,9 @@ export interface Widget {
   /** Verbose render — used by RowLayout. Returns existing-style ANSI output. */
   render(ctx: RenderContext): WidgetCell | null;
 
-  /** Optional minimal render — used by HushLayout. If absent, HushLayout falls back to render() with ANSI stripped. */
-  renderHush?(ctx: RenderContext): HushCell | null;
+  /** Optional minimal render — used by HushLayout. If absent, HushLayout falls back to render() with ANSI stripped.
+   *  May return an array to emit multiple sub-cells (e.g., project widget emits name + branch + model). */
+  renderHush?(ctx: RenderContext): HushCell | HushCell[] | null;
 }
 
 export type WidgetGroup = "header" | "metrics" | "activity";
@@ -32,4 +33,9 @@ export interface HushCell {
   group?: WidgetGroup;
   text: string;                              // PLAIN — no ANSI codes
   attention: "muted" | "normal" | "warning" | "danger";
+  link?: string;                             // optional OSC 8 URL (project name / branch / model)
+  animate?: "spinner" | null;               // optional animation hint: "spinner" for running activity
+  /** Optional baseline color key (cyan, green, blue, etc.) used by HushLayout for "normal" attention cells.
+   *  When absent, "normal" attention cells render without additional color (default fg). */
+  baseColor?: string;
 }

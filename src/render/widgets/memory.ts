@@ -16,4 +16,9 @@ export const memoryWidget: Widget = {
     // id/group injected by orchestrator
     return { body, visualWidth: maxLineWidth(body) };
   },
+
+  // Hidden in Hush mode by user feedback (commit ref: this PR plan section 4.3)
+  renderHush(_ctx: RenderContext): null {
+    return null;
+  },
 };
