@@ -435,7 +435,19 @@ export const hushLayout: Layout = {
     // -----------------------------------------------------------------------
     const cappedActivity = capActivityCells(activityCells);
 
-    // Count total tools represented by the activity cells
+    // Count total tools represented by the activity cells.
+    //
+    // The multiplicity suffix "×N" may live in EITHER:
+    //   - cell.secondaryText  — the future-proofed/structured shape, used by
+    //     widgets that split name and count for separate styling (primary/
+    //     secondary) — preferred location for new widgets.
+    //   - cell.text           — the current toolsWidget shape, where the count
+    //     is baked into the rendered text (e.g. "Edit ×2" or "✓ Edit ×3").
+    //
+    // We check secondaryText first, fall back to text — this absorbs both
+    // shapes without coupling the layout to a specific widget's emission style.
+    // A "+N more" cell adds N (representing N hidden cells, each undercounted
+    // here as 1 — acceptable since hidden cells were truncated anyway).
     const totalToolCount = (() => {
       let n = 0;
       for (const c of cappedActivity) {
@@ -443,7 +455,7 @@ export const hushLayout: Layout = {
         if (moreM) {
           n += Number.parseInt(moreM[1]!, 10);
         } else {
-          const countM = /×(\d+)/.exec(c.text);
+          const countM = /×(\d+)/.exec(c.secondaryText ?? c.text ?? "");
           n += countM ? Number.parseInt(countM[1]!, 10) : 1;
         }
       }

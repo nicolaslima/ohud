@@ -1280,6 +1280,70 @@ describe("prose sentence — active tools → activity line with counter", () =>
     expect(activityLine).toMatch(/^ {2}/);
   });
 
+  test("counter sums ×N from cell.secondaryText (production cell shape)", () => {
+    // Regression for a bug where the counter regex only checked cell.text,
+    // missing the multiplicity when widgets emit it in `secondaryText` (the
+    // structured shape used for separate primary/secondary styling).
+    //
+    // Fixture mirrors a future widget shape: text="Edit", secondaryText="×3"
+    // for a multi-instance tool. The counter must sum to 3, not 1.
+    const ctx = makeCtx();
+    const activityCells: HushCell[] = [
+      // Three Edits collapsed into one cell with secondaryText carrying ×3
+      {
+        text: "Edit",
+        primaryText: "Edit",
+        secondaryText: "×3",
+        attention: "normal",
+        baseColor: "cyan",
+        animate: "spinner",
+        group: "activity",
+      },
+      // Two Reads collapsed into another cell with ×2 in secondaryText
+      {
+        text: "Read",
+        primaryText: "Read",
+        secondaryText: "×2",
+        attention: "normal",
+        baseColor: "cyan",
+        animate: "spinner",
+        group: "activity",
+      },
+      // One Bash with no count suffix (single instance) — contributes 1
+      {
+        text: "Bash",
+        attention: "normal",
+        baseColor: "cyan",
+        animate: "spinner",
+        group: "activity",
+      },
+    ];
+    const cells = [...collectCells([projectWidget, contextWidget], ctx), ...activityCells];
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const activityPlain = stripAnsi(lines[lines.length - 1]!);
+    // Total: 3 + 2 + 1 = 6
+    expect(activityPlain).toContain("⌗6");
+  });
+
+  test("counter sums ×N from cell.text (toolsWidget production shape)", () => {
+    // toolsWidget bakes "×N" into cell.text directly; the regex must still match.
+    const ctx = makeCtx();
+    ctx.config.display.showTools = true;
+    ctx.transcript.tools = [
+      // 3 Edit + 2 Read + 1 Bash = 6 invocations across 3 deduped names
+      { id: "e1", name: "Edit", status: "running", startTime: new Date(Date.now() - 1000) },
+      { id: "e2", name: "Edit", status: "running", startTime: new Date(Date.now() - 1000) },
+      { id: "e3", name: "Edit", status: "running", startTime: new Date(Date.now() - 1000) },
+      { id: "r1", name: "Read", status: "running", startTime: new Date(Date.now() - 1000) },
+      { id: "r2", name: "Read", status: "running", startTime: new Date(Date.now() - 1000) },
+      { id: "b1", name: "Bash", status: "running", startTime: new Date(Date.now() - 1000) },
+    ];
+    const cells = collectCells([projectWidget, contextWidget, toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const activityPlain = stripAnsi(lines[lines.length - 1]!);
+    expect(activityPlain).toContain("⌗6");
+  });
+
   test("all three lines: sentence + wrapped-extras + activity", () => {
     const ctx = makeCtx({
       stdin: {

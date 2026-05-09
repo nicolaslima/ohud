@@ -2592,7 +2592,7 @@ var hushLayout = {
         if (moreM) {
           n += Number.parseInt(moreM[1], 10);
         } else {
-          const countM = /×(\d+)/.exec(c.text);
+          const countM = /×(\d+)/.exec(c.secondaryText ?? c.text ?? "");
           n += countM ? Number.parseInt(countM[1], 10) : 1;
         }
       }
