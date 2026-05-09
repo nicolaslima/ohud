@@ -38,7 +38,7 @@ export const WIDGETS: readonly Widget[] = [
  * Returns the subset of WIDGETS that are gated "visible" by the given config.
  *
  * Visibility mirrors the existing `display.show*` flag checks in src/render/index.ts
- * and each src/render/lines/<id>.ts exactly. Returning false here means
+ * and each src/render/widgets/<id>.ts exactly. Returning false here means
  * RowLayout will never call w.render(ctx), so the widget never appears.
  *
  * Note: some widgets (cost, context, usage) gate themselves in their own

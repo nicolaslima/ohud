@@ -474,6 +474,8 @@ describe("compactWhenIdle", () => {
     const cells = collectCells([projectWidget, contextWidget], ctx);
     const lines = hushLayout.pack(cells, 200, ctx.config);
     expect(lines.length).toBe(2);
+    // When idle (no activity cells), line 2 must be empty string
+    expect(lines[1]).toBe("");
   });
 });
 
@@ -782,6 +784,49 @@ describe("hush.thresholds override", () => {
     const cell = contextWidget.renderHush!(ctx) as HushCell;
     // 50% >= 40 (warning) and < 75 (danger) → warning
     expect(cell.attention).toBe("warning");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 14: glyphMode env injection — Unicode/ASCII switching testable via env
+// ---------------------------------------------------------------------------
+
+import { glyphMode } from "../src/render/layout/hush.js";
+
+describe("glyphMode env injection", () => {
+  test("unicode mode when env.LANG contains UTF-8", () => {
+    const ctx = makeCtx();
+    ctx.config.display.glyphs = "auto";
+    const result = glyphMode(ctx.config, { LANG: "en_US.UTF-8" });
+    expect(result).toBe("unicode");
+  });
+
+  test("unicode mode when env.LC_ALL contains UTF-8", () => {
+    const ctx = makeCtx();
+    ctx.config.display.glyphs = "auto";
+    const result = glyphMode(ctx.config, { LC_ALL: "en_US.UTF-8" });
+    expect(result).toBe("unicode");
+  });
+
+  test("ascii mode when env.LANG does not contain UTF-8", () => {
+    const ctx = makeCtx();
+    ctx.config.display.glyphs = "auto";
+    const result = glyphMode(ctx.config, { LANG: "C" });
+    expect(result).toBe("ascii");
+  });
+
+  test("unicode forced regardless of env when config.glyphs = 'unicode'", () => {
+    const ctx = makeCtx();
+    ctx.config.display.glyphs = "unicode";
+    const result = glyphMode(ctx.config, { LANG: "C" });
+    expect(result).toBe("unicode");
+  });
+
+  test("ascii forced regardless of env when config.glyphs = 'ascii'", () => {
+    const ctx = makeCtx();
+    ctx.config.display.glyphs = "ascii";
+    const result = glyphMode(ctx.config, { LANG: "en_US.UTF-8" });
+    expect(result).toBe("ascii");
   });
 });
 

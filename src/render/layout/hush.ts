@@ -18,6 +18,7 @@
 import type { WidgetCell, HushCell } from "../widget.js";
 import type { Layout } from "./index.js";
 import type { HudConfig } from "../../types.js";
+import { isColorDisabled } from "../colors.js";
 import { dim } from "../dim.js";
 import { spinnerFrame } from "../spinner.js";
 import { link as osc8 } from "../hyperlink.js";
@@ -37,14 +38,8 @@ const SGR_FG: Record<string, string> = {
 
 const RESET_FG = "\x1b[39m";
 
-function colorDisabled(env: NodeJS.ProcessEnv): boolean {
-  if (env.NO_COLOR !== undefined && env.NO_COLOR !== "") return true;
-  if (env.TERM === "dumb") return true;
-  return false;
-}
-
 function applyColor(text: string, colorName: string, env: NodeJS.ProcessEnv): string {
-  if (colorDisabled(env)) return text;
+  if (isColorDisabled(env)) return text;
   const code = SGR_FG[colorName];
   if (!code) return text;
   return `\x1b[${code}m${text}${RESET_FG}`;
@@ -58,22 +53,27 @@ function applyColor(text: string, colorName: string, env: NodeJS.ProcessEnv): st
  * fall back to plain `dim()` (which itself returns plain text in NO_COLOR mode).
  */
 function applyDimColor(text: string, colorName: string | undefined, env: NodeJS.ProcessEnv): string {
-  if (colorDisabled(env)) return text;            // dim() would also return text; short-circuit
+  if (isColorDisabled(env)) return text;          // dim() would also return text; short-circuit
   if (!colorName) return dim(text, env);          // no baseColor → plain dim
   const code = SGR_FG[colorName];
   if (!code) return dim(text, env);               // unknown color → plain dim
   return `\x1b[2;${code}m${text}\x1b[22;39m`;
 }
 
-/** Resolve the glyph mode from config. */
-function glyphMode(config: HudConfig): "unicode" | "ascii" {
+/**
+ * Resolve the glyph mode from config, using the provided env for LANG/LC_ALL.
+ * Accepts an optional `env` param so callers can inject a custom environment
+ * for testing (avoids direct reads of `process.env` inside the function).
+ */
+export function glyphMode(config: HudConfig, env?: NodeJS.ProcessEnv): "unicode" | "ascii" {
   const g = config.display.glyphs;
   if (g === "unicode") return "unicode";
   if (g === "ascii") return "ascii";
-  // "auto" — check LANG
-  const lang = process.env.LANG ?? "";
+  // "auto" — check LANG/LC_ALL from the provided env (or process.env as fallback)
+  const e = env ?? process.env;
+  const lang = e.LANG ?? "";
   if (lang.includes("UTF-8") || lang.toLowerCase().includes("utf8")) return "unicode";
-  if (process.env.LC_ALL?.includes("UTF-8")) return "unicode";
+  if (e.LC_ALL?.includes("UTF-8")) return "unicode";
   return "ascii";
 }
 
@@ -102,7 +102,7 @@ function renderCell(
   }
 
   // Step 3: apply ANSI color by attention level
-  const noColor = colorDisabled(env);
+  const noColor = isColorDisabled(env);
   switch (cell.attention) {
     case "muted":
       // Per plan section 4.5: muted cells with baseColor combine dim+color
@@ -144,8 +144,8 @@ export const hushLayout: Layout = {
     const hushCells = cells.filter((c): c is HushCell => "text" in c && "attention" in c);
 
     const now = Date.now();
-    const mode = glyphMode(config);
     const env = process.env;
+    const mode = glyphMode(config, env);
 
     // Read user toggles from config; both default to true per plan section 5.
     const toggles: HushToggles = {

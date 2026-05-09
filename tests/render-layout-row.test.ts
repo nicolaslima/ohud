@@ -5,21 +5,30 @@
 //
 // Strategy: we call render() (which now delegates to RowLayout) and assert the
 // same structural properties the old renderer guaranteed. For exact-string
-// comparisons we derive expected values from the known output of the
-// underlying lines/<id>.ts functions (which are NOT modified).
+// comparisons we derive expected values from the widget.render(ctx) bodies —
+// these are the same render functions that RowLayout calls.
 //
 import { test, expect, describe } from "bun:test";
 import { visibleWidth } from "../src/render/width.js";
 import { render } from "../src/render/index.js";
-import { renderProject } from "../src/render/lines/project.js";
-import { renderContext } from "../src/render/lines/context.js";
-import { renderUsage } from "../src/render/lines/usage.js";
-import { renderApiTime } from "../src/render/lines/api-time.js";
-import { renderCost } from "../src/render/lines/cost.js";
+import { projectWidget } from "../src/render/widgets/project.js";
+import { contextWidget } from "../src/render/widgets/context.js";
+import { usageWidget } from "../src/render/widgets/usage.js";
+import { apiTimeWidget } from "../src/render/widgets/api-time.js";
+import { costWidget } from "../src/render/widgets/cost.js";
 import { color } from "../src/render/colors.js";
 import { glyph } from "../src/render/glyphs.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
+
+// Helpers to call widget.render() and return body (same as what RowLayout uses).
+// renderProject always returns a string (project is the anchor widget, never null in practice).
+// Others may return null — callers use the ! non-null assertion where the original guaranteed a value.
+function renderProject(ctx: RenderContext): string { return projectWidget.render(ctx)?.body ?? ""; }
+function renderContext(ctx: RenderContext): string | null { return contextWidget.render(ctx)?.body ?? null; }
+function renderUsage(ctx: RenderContext): string | null { return usageWidget.render(ctx)?.body ?? null; }
+function renderApiTime(ctx: RenderContext): string | null { return apiTimeWidget.render(ctx)?.body ?? null; }
+function renderCost(ctx: RenderContext): string | null { return costWidget.render(ctx)?.body ?? null; }
 
 // ---------------------------------------------------------------------------
 // Helpers

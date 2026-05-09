@@ -1,0 +1,40 @@
+# Hush Layout — Three Rendered States
+# ASCII mockup — replace with PNG screenshot post-merge.
+# TODO: generate via `echo '<stdin-json>' | node dist/index.js` with display.layout:"hush"
+#        and screenshot with a truecolor terminal (iTerm2 / Kitty / WezTerm).
+
+── IDLE (low context, clean git, no active tools) ──────────────────────────────
+ohud  main  opus-4.7  15%
+
+Legend:
+  ohud     — cyan, OSC 8 link → file:///path/to/project
+  main     — green (clean branch), OSC 8 link → remote URL if detected
+  opus-4.7 — blue, OSC 8 link → docs.anthropic.com/…/models#claude-opus-47
+  15%      — dim (below warning threshold of 60%)
+
+── ACTIVE (warning context, running tools, dirty git) ──────────────────────────
+ohud  main*  opus-4.7  68%
+◑ Edit ×4   ◑ Read ×2
+
+Legend:
+  main*  — yellow (dirty branch, warning attention)
+  68%    — yellow (≥60% warning threshold)
+  ◑      — animated spinner cycling ◐ ◓ ◑ ◒ at 1 Hz
+  Edit   — cyan (active tool name); ×4 — dim count
+  Read   — cyan; ×2 — dim count
+
+── CRITICAL (danger context, mixed running + done tools) ────────────────────────
+ohud  main*  opus-4.7  92%
+◑ Edit ×4   ✓ Search ×10
+
+Legend:
+  92%       — red (≥75% danger threshold)
+  ◑ Edit ×4 — cyan + spinner (running)
+  ✓ Search  — dim green (completed), static checkmark (no spinner)
+  ×10       — dim count
+
+────────────────────────────────────────────────────────────────────────────────
+Note: In NO_COLOR=1 mode, all ANSI codes strip out.
+      OSC 8 hyperlinks remain (they are metadata, not color).
+      Spinners still animate (they are chars, not color).
+      The asterisk (*) on dirty branches is the only structural dirty cue.

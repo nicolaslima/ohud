@@ -1,7 +1,7 @@
 // src/render/widgets/duration.ts
 import type { Widget, WidgetCell, HushCell } from "../widget.js";
 import type { RenderContext } from "../../types.js";
-import { renderDuration } from "../lines/duration.js";
+import { color } from "../colors.js";
 import { maxLineWidth } from "./_util.js";
 
 // Time thresholds for duration attention
@@ -18,7 +18,6 @@ export const durationWidget: Widget = {
   render(ctx: RenderContext): WidgetCell | null {
     const body = renderDuration(ctx);
     if (body == null) return null;
-    // id/group injected by orchestrator
     return { body, visualWidth: maxLineWidth(body) };
   },
 
@@ -50,4 +49,39 @@ function formatDurationHush(ms: number): string {
   if (h > 0 && m > 0) return `${h}h ${m}m`;
   if (h > 0) return `${h}h`;
   return `${m}m`;
+}
+
+// ---------------------------------------------------------------------------
+// Row render implementation (moved from src/render/lines/duration.ts)
+// ---------------------------------------------------------------------------
+
+function renderDuration(ctx: RenderContext): string | null {
+  const showDuration = ctx.config.display.showDuration;
+  const showSpeed = ctx.config.display.showSpeed;
+  if (!showDuration && !showSpeed) return null;
+
+  const c = ctx.config.colors;
+  const parts: string[] = [];
+
+  if (showDuration) {
+    const ms = ctx.stdin.cost?.total_duration_ms;
+    if (typeof ms === "number" && ms > 0) parts.push(`⏱ ${formatHms(ms)}`);
+  }
+  if (showSpeed) {
+    const tps = computeTokensPerSecond(ctx);
+    if (tps !== null) parts.push(`out: ${tps.toFixed(1)} tok/s`);
+  }
+  if (parts.length === 0) return null;
+  return color(c.label, parts.join(" | "));
+}
+
+function formatHms(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m > 0 ? `${m}m` : `${s}s`;
+}
+
+function computeTokensPerSecond(_ctx: RenderContext): number | null {
+  return null;
 }

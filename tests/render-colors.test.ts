@@ -1,6 +1,6 @@
 // tests/render-colors.test.ts
 import { test, expect } from "bun:test";
-import { color, RESET } from "../src/render/colors.js";
+import { color, isColorDisabled, RESET } from "../src/render/colors.js";
 
 test("named colors emit known ANSI codes", () => {
   expect(color("red", "x")).toBe(`\x1b[31mx${RESET}`);
@@ -31,4 +31,17 @@ test("color() returns plain text when TERM is dumb", () => {
   process.env.TERM = "dumb";
   try { expect(color("red", "x")).toBe("x"); }
   finally { if (orig === undefined) delete process.env.TERM; else process.env.TERM = orig; }
+});
+
+// isColorDisabled — shared source of truth tests
+test("isColorDisabled returns true when NO_COLOR set in injected env", () => {
+  expect(isColorDisabled({ NO_COLOR: "1" })).toBe(true);
+});
+
+test("isColorDisabled returns true when TERM=dumb in injected env", () => {
+  expect(isColorDisabled({ TERM: "dumb" })).toBe(true);
+});
+
+test("isColorDisabled returns false when env is empty", () => {
+  expect(isColorDisabled({})).toBe(false);
 });

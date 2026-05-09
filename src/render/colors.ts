@@ -5,14 +5,20 @@ const NAMED: Record<string, string> = {
   magenta: "\x1b[35m", cyan: "\x1b[36m", brightBlue: "\x1b[94m", brightMagenta: "\x1b[95m",
 };
 
-function colorDisabled(): boolean {
-  if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== "") return true;
-  if (process.env.TERM === "dumb") return true;
+/**
+ * Returns true when ANSI color output should be suppressed.
+ * Checks NO_COLOR (non-empty) and TERM=dumb per convention.
+ * Accepts an optional env override for testability; defaults to process.env.
+ */
+export function isColorDisabled(env?: NodeJS.ProcessEnv): boolean {
+  const e = env ?? process.env;
+  if (e.NO_COLOR !== undefined && e.NO_COLOR !== "") return true;
+  if (e.TERM === "dumb") return true;
   return false;
 }
 
 export function color(spec: string, text: string): string {
-  if (colorDisabled()) return text;
+  if (isColorDisabled()) return text;
   if (NAMED[spec]) return `${NAMED[spec]}${text}${RESET}`;
   if (/^\d+$/.test(spec)) {
     const n = Number.parseInt(spec, 10);

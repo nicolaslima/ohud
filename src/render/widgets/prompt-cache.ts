@@ -1,7 +1,7 @@
 // src/render/widgets/prompt-cache.ts
 import type { Widget, WidgetCell, HushCell } from "../widget.js";
 import type { RenderContext } from "../../types.js";
-import { renderPromptCache } from "../lines/prompt-cache.js";
+import { color } from "../colors.js";
 import { maxLineWidth } from "./_util.js";
 import { promptCacheRemainingMs, formatPromptCache } from "../../prompt-cache.js";
 
@@ -17,7 +17,6 @@ export const promptCacheWidget: Widget = {
   render(ctx: RenderContext): WidgetCell | null {
     const body = renderPromptCache(ctx);
     if (body == null) return null;
-    // id/group injected by orchestrator
     return { body, visualWidth: maxLineWidth(body) };
   },
 
@@ -38,3 +37,19 @@ export const promptCacheWidget: Widget = {
     };
   },
 };
+
+// ---------------------------------------------------------------------------
+// Row render implementation (moved from src/render/lines/prompt-cache.ts)
+// ---------------------------------------------------------------------------
+
+function renderPromptCache(ctx: RenderContext): string | null {
+  if (ctx.mode !== "anthropic") return null;
+  if (!ctx.config.display.showPromptCache) return null;
+  const remaining = promptCacheRemainingMs(
+    ctx.transcript.lastAssistantResponseAt,
+    ctx.config.display.promptCacheTtlSeconds,
+  );
+  if (remaining === null) return null;
+  const c = ctx.config.colors;
+  return `${color(c.label, "cache")} ${color(c.label, formatPromptCache(remaining))}`;
+}

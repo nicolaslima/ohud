@@ -1,19 +1,22 @@
-// tests/render-lines.test.ts
+// tests/render-widgets.test.ts
+// Renamed from render-lines.test.ts. Imports now use widget objects from
+// src/render/widgets/*.ts and call widget.render(ctx) instead of bare
+// render*() functions (Option a — no additional API surface).
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { renderProject } from "../src/render/lines/project.js";
-import { renderContext } from "../src/render/lines/context.js";
-import { renderApiTime } from "../src/render/lines/api-time.js";
-import { renderUsage } from "../src/render/lines/usage.js";
-import { renderCost } from "../src/render/lines/cost.js";
-import { renderPromptCache } from "../src/render/lines/prompt-cache.js";
-import { renderTools } from "../src/render/lines/tools.js";
-import { renderAgents } from "../src/render/lines/agents.js";
-import { renderTodos } from "../src/render/lines/todos.js";
-import { renderEnvironment } from "../src/render/lines/environment.js";
-import { renderMemory } from "../src/render/lines/memory.js";
-import { renderDuration } from "../src/render/lines/duration.js";
+import { projectWidget } from "../src/render/widgets/project.js";
+import { contextWidget } from "../src/render/widgets/context.js";
+import { apiTimeWidget } from "../src/render/widgets/api-time.js";
+import { usageWidget } from "../src/render/widgets/usage.js";
+import { costWidget } from "../src/render/widgets/cost.js";
+import { promptCacheWidget } from "../src/render/widgets/prompt-cache.js";
+import { toolsWidget } from "../src/render/widgets/tools.js";
+import { agentsWidget } from "../src/render/widgets/agents.js";
+import { todosWidget } from "../src/render/widgets/todos.js";
+import { environmentWidget } from "../src/render/widgets/environment.js";
+import { memoryWidget } from "../src/render/widgets/memory.js";
+import { durationWidget } from "../src/render/widgets/duration.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 
@@ -29,9 +32,15 @@ function makeCtx(stdin: StdinData, mode: "ollama" | "anthropic"): RenderContext 
   };
 }
 
+/** Helper: call widget.render(ctx) and return body or null */
+function renderBody(widget: typeof projectWidget, ctx: RenderContext): string | null {
+  const cell = widget.render(ctx);
+  return cell ? cell.body : null;
+}
+
 test("project line — ollama mode", () => {
   const stdin = fx("stdin-ollama-cloud.json");
-  const out = renderProject(makeCtx(stdin, "ollama"));
+  const out = renderBody(projectWidget, makeCtx(stdin, "ollama"));
   expect(out).toContain("glm-5:cloud");
   expect(out).toContain("ohud");
   expect(out).toContain("main");
@@ -40,7 +49,7 @@ test("project line — ollama mode", () => {
 
 test("project line — anthropic mode", () => {
   const stdin = fx("stdin-anthropic-pro.json");
-  const out = renderProject(makeCtx(stdin, "anthropic"));
+  const out = renderBody(projectWidget, makeCtx(stdin, "anthropic"));
   expect(out).toContain("Opus");
   expect(out).toContain("ohud");
 });
@@ -55,7 +64,7 @@ test("project line prefers project_dir basename over current_dir worktree slice"
   };
   const ctx = makeCtx(stdin, "anthropic");
   ctx.gitStatus = null;
-  const out = renderProject(ctx);
+  const out = renderBody(projectWidget, ctx);
   expect(out).toContain("claude-code");
   expect(out).not.toContain("release+setup-plugin-structure");
   expect(out).not.toContain(".worktrees");
@@ -69,7 +78,7 @@ test("project line falls back to current_dir basename when project_dir absent (p
   const ctx = makeCtx(stdin, "anthropic");
   ctx.gitStatus = null;
   ctx.config.pathLevels = 1;
-  const out = renderProject(ctx);
+  const out = renderBody(projectWidget, ctx);
   expect(out).toContain("baz");
   expect(out).not.toContain("bar/baz");
 });
@@ -82,7 +91,7 @@ test("project line falls back to current_dir when project_dir is empty string", 
   const ctx = makeCtx(stdin, "anthropic");
   ctx.gitStatus = null;
   ctx.config.pathLevels = 1;
-  const out = renderProject(ctx);
+  const out = renderBody(projectWidget, ctx);
   expect(out).toContain("baz");
 });
 
@@ -94,7 +103,7 @@ test("project line falls back to current_dir when project_dir is just root", () 
   const ctx = makeCtx(stdin, "anthropic");
   ctx.gitStatus = null;
   ctx.config.pathLevels = 1;
-  const out = renderProject(ctx);
+  const out = renderBody(projectWidget, ctx);
   expect(out).toContain("baz");
 });
 
@@ -106,20 +115,20 @@ test("project line — pathLevels=2 still applies in current_dir fallback", () =
   const ctx = makeCtx(stdin, "anthropic");
   ctx.gitStatus = null;
   ctx.config.pathLevels = 2;
-  const out = renderProject(ctx);
+  const out = renderBody(projectWidget, ctx);
   expect(out).toContain("bar/baz");
 });
 
 test("context line — under threshold", () => {
   const stdin = fx("stdin-anthropic-pro.json");
-  const out = renderContext(makeCtx(stdin, "anthropic"));
+  const out = renderBody(contextWidget, makeCtx(stdin, "anthropic"));
   expect(out).toContain("Context");
   expect(out).toContain("45%");
 });
 
 test("context line — empty when used_percentage missing", () => {
   const stdin: StdinData = { context_window: {} };
-  const out = renderContext(makeCtx(stdin, "anthropic"));
+  const out = renderBody(contextWidget, makeCtx(stdin, "anthropic"));
   expect(out).toBeNull();
 });
 
@@ -127,7 +136,7 @@ test("api-time line in ollama mode uses total_api_duration_ms", () => {
   const stdin = fx("stdin-ollama-cloud.json");
   const ctx = makeCtx(stdin, "ollama");
   ctx.stdin.cost = { total_api_duration_ms: 75_000 };
-  const out = renderApiTime(ctx);
+  const out = renderBody(apiTimeWidget, ctx);
   expect(out).toContain("API");
   expect(out).toContain("⏱");
   expect(out).toContain("1m 15s");
@@ -137,19 +146,19 @@ test("api-time line returns null when no API duration available", () => {
   const stdin = fx("stdin-ollama-cloud.json");
   const ctx = makeCtx(stdin, "ollama");
   ctx.stdin.cost = {};
-  expect(renderApiTime(ctx)).toBeNull();
+  expect(renderBody(apiTimeWidget, ctx)).toBeNull();
 });
 
 test("api-time line null in anthropic mode", () => {
   const stdin = fx("stdin-anthropic-pro.json");
-  expect(renderApiTime(makeCtx(stdin, "anthropic"))).toBeNull();
+  expect(renderBody(apiTimeWidget, makeCtx(stdin, "anthropic"))).toBeNull();
 });
 
 test("usage line — bar with 5h", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
   ctx.usageData = { fiveHour: 25, sevenDay: 41, fiveHourResetAt: new Date(Date.now() + 90 * 60 * 1000), sevenDayResetAt: null };
-  const out = renderUsage(ctx);
+  const out = renderBody(usageWidget, ctx);
   expect(out).toContain("Usage");
   expect(out).toContain("25%");
 });
@@ -157,13 +166,13 @@ test("usage line — bar with 5h", () => {
 test("usage line — null in ollama mode", () => {
   const stdin = fx("stdin-ollama-cloud.json");
   const ctx = makeCtx(stdin, "ollama");
-  expect(renderUsage(ctx)).toBeNull();
+  expect(renderBody(usageWidget, ctx)).toBeNull();
 });
 
 test("usage line — null when usageData missing", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
-  expect(renderUsage(ctx)).toBeNull();
+  expect(renderBody(usageWidget, ctx)).toBeNull();
 });
 
 test("usage line — adds 7d when above threshold", () => {
@@ -171,7 +180,7 @@ test("usage line — adds 7d when above threshold", () => {
   const ctx = makeCtx(stdin, "anthropic");
   ctx.usageData = { fiveHour: 50, sevenDay: 90, fiveHourResetAt: null, sevenDayResetAt: null };
   ctx.config.display.sevenDayThreshold = 80;
-  const out = renderUsage(ctx);
+  const out = renderBody(usageWidget, ctx);
   expect(out).toContain("90%");
 });
 
@@ -180,7 +189,7 @@ test("cost line shows native value", () => {
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showCost = true;
   ctx.costData = { totalUsd: 0.42, source: "native" };
-  const out = renderCost(ctx);
+  const out = renderBody(costWidget, ctx);
   expect(out).toContain("$0.42");
 });
 
@@ -189,14 +198,14 @@ test("cost line null when toggle off and only estimate available", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
   ctx.costData = { totalUsd: 0.42, source: "estimate" };
-  expect(renderCost(ctx)).toBeNull();
+  expect(renderBody(costWidget, ctx)).toBeNull();
 });
 
 test("cost line auto-shows on extra-usage (toggle off + native > 0)", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
   ctx.costData = { totalUsd: 0.42, source: "native" };
-  const out = renderCost(ctx);
+  const out = renderBody(costWidget, ctx);
   expect(out).toContain("$0.42");
 });
 
@@ -205,7 +214,7 @@ test("cost line null in ollama mode", () => {
   const ctx = makeCtx(stdin, "ollama");
   ctx.config.display.showCost = true;
   ctx.costData = { totalUsd: 0.42, source: "native" };
-  expect(renderCost(ctx)).toBeNull();
+  expect(renderBody(costWidget, ctx)).toBeNull();
 });
 
 test("prompt cache line — anthropic mode opt-in", () => {
@@ -213,7 +222,7 @@ test("prompt cache line — anthropic mode opt-in", () => {
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showPromptCache = true;
   ctx.transcript.lastAssistantResponseAt = new Date(Date.now() - 60_000);
-  const out = renderPromptCache(ctx);
+  const out = renderBody(promptCacheWidget, ctx);
   expect(out).toContain("cache");
   expect(out).toMatch(/\d+m \d+s|\d+s/);
 });
@@ -222,7 +231,7 @@ test("prompt cache line null in ollama mode", () => {
   const stdin = fx("stdin-ollama-cloud.json");
   const ctx = makeCtx(stdin, "ollama");
   ctx.config.display.showPromptCache = true;
-  expect(renderPromptCache(ctx)).toBeNull();
+  expect(renderBody(promptCacheWidget, ctx)).toBeNull();
 });
 
 test("tools line shows running and counts of completed", () => {
@@ -235,7 +244,7 @@ test("tools line shows running and counts of completed", () => {
     { id: "3", name: "Read", status: "completed", startTime: new Date() },
     { id: "4", name: "Read", status: "completed", startTime: new Date() },
   ];
-  const out = renderTools(ctx);
+  const out = renderBody(toolsWidget, ctx);
   expect(out).toContain("Edit");
   expect(out).toContain("auth.ts");
   expect(out).toContain("Read ×3");
@@ -244,7 +253,7 @@ test("tools line shows running and counts of completed", () => {
 test("tools line null when toggle off", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
-  expect(renderTools(ctx)).toBeNull();
+  expect(renderBody(toolsWidget, ctx)).toBeNull();
 });
 
 test("tools line dedups N parallel running tools with same target — `Edit ×N: foo.ts`", () => {
@@ -256,7 +265,7 @@ test("tools line dedups N parallel running tools with same target — `Edit ×N:
     { id: "2", name: "Edit", target: "foo.ts", status: "running", startTime: new Date() },
     { id: "3", name: "Edit", target: "foo.ts", status: "running", startTime: new Date() },
   ];
-  const out = renderTools(ctx) ?? "";
+  const out = renderBody(toolsWidget, ctx) ?? "";
   expect(out).toContain("Edit ×3");
   expect(out).toContain("foo.ts");
   // Only one Edit running entry (not three).
@@ -272,7 +281,7 @@ test("tools line drops target when N parallel tools have different targets — `
     { id: "1", name: "Edit", target: "foo.ts", status: "running", startTime: new Date() },
     { id: "2", name: "Edit", target: "bar.ts", status: "running", startTime: new Date() },
   ];
-  const out = renderTools(ctx) ?? "";
+  const out = renderBody(toolsWidget, ctx) ?? "";
   expect(out).toContain("Edit ×2");
   expect(out).not.toContain("foo.ts");
   expect(out).not.toContain("bar.ts");
@@ -286,7 +295,7 @@ test("tools line keeps separate entries for distinct tool names", () => {
     { id: "1", name: "Edit", target: "foo.ts", status: "running", startTime: new Date() },
     { id: "2", name: "Read", target: "bar.ts", status: "running", startTime: new Date() },
   ];
-  const out = renderTools(ctx) ?? "";
+  const out = renderBody(toolsWidget, ctx) ?? "";
   expect(out).toContain("Edit");
   expect(out).toContain("Read");
   expect(out).toContain("foo.ts");
@@ -301,7 +310,7 @@ test("tools line — single running, no target → just glyph + name", () => {
   ctx.transcript.tools = [
     { id: "1", name: "Skill", status: "running", startTime: new Date() },
   ];
-  const out = renderTools(ctx) ?? "";
+  const out = renderBody(toolsWidget, ctx) ?? "";
   expect(out).toContain("Skill");
   expect(out).not.toContain("×");
   expect(out).not.toContain(":");
@@ -314,7 +323,7 @@ test("agents line shows running agent", () => {
   ctx.transcript.agents = [
     { id: "1", type: "explore", description: "Finding auth code", model: "haiku", status: "running", startTime: new Date(Date.now() - 90_000) },
   ];
-  const out = renderAgents(ctx);
+  const out = renderBody(agentsWidget, ctx);
   expect(out).toContain("explore");
   expect(out).toContain("haiku");
   expect(out).toContain("Finding auth code");
@@ -330,7 +339,7 @@ test("agents line — 2 running agents emit 2 lines", () => {
     { id: "1", type: "explore", description: "A", status: "running", startTime: new Date() },
     { id: "2", type: "review", description: "B", status: "running", startTime: new Date() },
   ];
-  const out = renderAgents(ctx) ?? "";
+  const out = renderBody(agentsWidget, ctx) ?? "";
   const lines = out.split("\n");
   expect(lines.length).toBe(2);
   expect(lines[0]).toContain("explore");
@@ -350,7 +359,7 @@ test("agents line — 3 running + 2 completed → 3 running lines + 1 completed-
     { id: "4", type: "explore", status: "completed", startTime: new Date(), endTime: new Date() },
     { id: "5", type: "explore", status: "completed", startTime: new Date(), endTime: new Date() },
   ];
-  const out = renderAgents(ctx) ?? "";
+  const out = renderBody(agentsWidget, ctx) ?? "";
   const lines = out.split("\n");
   expect(lines.length).toBe(4);
   expect(lines[3]).toContain("explore ×2");
@@ -365,7 +374,7 @@ test("agents line — 0 running + 3 completed → single completed-summary line"
     { id: "2", type: "explore", status: "completed", startTime: new Date(), endTime: new Date() },
     { id: "3", type: "review", status: "completed", startTime: new Date(), endTime: new Date() },
   ];
-  const out = renderAgents(ctx) ?? "";
+  const out = renderBody(agentsWidget, ctx) ?? "";
   const lines = out.split("\n");
   expect(lines.length).toBe(1);
   expect(out).toContain("explore ×2");
@@ -376,7 +385,7 @@ test("agents line null with no agents", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showAgents = true;
-  expect(renderAgents(ctx)).toBeNull();
+  expect(renderBody(agentsWidget, ctx)).toBeNull();
 });
 
 test("todos line shows in-progress + counts", () => {
@@ -388,7 +397,7 @@ test("todos line shows in-progress + counts", () => {
     { content: "Write tests", status: "pending" },
     { content: "Update docs", status: "completed" },
   ];
-  const out = renderTodos(ctx);
+  const out = renderBody(todosWidget, ctx);
   expect(out).toContain("Fix auth bug");
   expect(out).toContain("(1/3)");
 });
@@ -397,13 +406,13 @@ test("todos line null when no todos", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showTodos = true;
-  expect(renderTodos(ctx)).toBeNull();
+  expect(renderBody(todosWidget, ctx)).toBeNull();
 });
 
 test("environment line null when toggle off", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
-  expect(renderEnvironment(ctx)).toBeNull();
+  expect(renderBody(environmentWidget, ctx)).toBeNull();
 });
 
 test("environment line shows zero when nothing found", () => {
@@ -411,14 +420,14 @@ test("environment line shows zero when nothing found", () => {
   stdin.workspace = { current_dir: "/tmp/nonexistent-dir-for-test" };
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showConfigCounts = true;
-  const out = renderEnvironment(ctx);
+  const out = renderBody(environmentWidget, ctx);
   expect(out).toContain("CLAUDE.md");
 });
 
 test("memory line null when toggle off", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
-  expect(renderMemory(ctx)).toBeNull();
+  expect(renderBody(memoryWidget, ctx)).toBeNull();
 });
 
 test("memory line renders when memoryInfo provided", () => {
@@ -426,7 +435,7 @@ test("memory line renders when memoryInfo provided", () => {
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showMemoryUsage = true;
   ctx.memoryInfo = { totalBytes: 32_000_000_000, usedBytes: 12_300_000_000, freeBytes: 19_700_000_000, usedPercent: 38 };
-  const out = renderMemory(ctx);
+  const out = renderBody(memoryWidget, ctx);
   expect(out).toContain("RAM");
   expect(out).toContain("38%");
 });
@@ -437,7 +446,7 @@ test("context line uses warning color at 60% (new threshold)", () => {
   };
   const ctx = makeCtx(stdin, "anthropic");
   // default colors: warning=yellow → ANSI \x1b[33m
-  const out = renderContext(ctx);
+  const out = renderBody(contextWidget, ctx);
   expect(out).toContain("\x1b[33m"); // yellow
   expect(out).not.toContain("\x1b[31m"); // not red
 });
@@ -447,7 +456,7 @@ test("context line uses critical color at 75% (new threshold)", () => {
     context_window: { used_percentage: 75, context_window_size: 200_000, total_input_tokens: 150_000 },
   };
   const ctx = makeCtx(stdin, "anthropic");
-  const out = renderContext(ctx);
+  const out = renderBody(contextWidget, ctx);
   expect(out).toContain("\x1b[31m"); // red
 });
 
@@ -456,7 +465,7 @@ test("context line uses default color below 60% (new threshold)", () => {
     context_window: { used_percentage: 59, context_window_size: 200_000, total_input_tokens: 118_000 },
   };
   const ctx = makeCtx(stdin, "anthropic");
-  const out = renderContext(ctx);
+  const out = renderBody(contextWidget, ctx);
   expect(out).toContain("\x1b[32m"); // green (context default)
   expect(out).not.toContain("\x1b[33m"); // not yellow
   expect(out).not.toContain("\x1b[31m"); // not red
@@ -466,7 +475,7 @@ test("usage line uses usageWarning color at 60% (new threshold)", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
   ctx.usageData = { fiveHour: 60, sevenDay: null, fiveHourResetAt: null, sevenDayResetAt: null };
-  const out = renderUsage(ctx);
+  const out = renderBody(usageWidget, ctx);
   // brightMagenta = \x1b[95m
   expect(out).toContain("\x1b[95m");
   expect(out).not.toContain("\x1b[31m"); // not red
@@ -476,7 +485,7 @@ test("usage line uses critical color at 75% (new threshold)", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
   ctx.usageData = { fiveHour: 75, sevenDay: null, fiveHourResetAt: null, sevenDayResetAt: null };
-  const out = renderUsage(ctx);
+  const out = renderBody(usageWidget, ctx);
   expect(out).toContain("\x1b[31m"); // red
 });
 
@@ -485,7 +494,7 @@ test("memory line uses warning color at 65%", () => {
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showMemoryUsage = true;
   ctx.memoryInfo = { totalBytes: 16_000_000_000, usedBytes: 10_400_000_000, freeBytes: 5_600_000_000, usedPercent: 65 };
-  const out = renderMemory(ctx);
+  const out = renderBody(memoryWidget, ctx);
   expect(out).toContain("\x1b[33m"); // yellow (warning)
   expect(out).not.toContain("\x1b[31m"); // not red
 });
@@ -495,7 +504,7 @@ test("memory line uses critical color at 76%", () => {
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showMemoryUsage = true;
   ctx.memoryInfo = { totalBytes: 16_000_000_000, usedBytes: 12_160_000_000, freeBytes: 3_840_000_000, usedPercent: 76 };
-  const out = renderMemory(ctx);
+  const out = renderBody(memoryWidget, ctx);
   expect(out).toContain("\x1b[31m"); // red (critical)
 });
 
@@ -504,7 +513,7 @@ test("memory line uses default color below threshold (38%)", () => {
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showMemoryUsage = true;
   ctx.memoryInfo = { totalBytes: 32_000_000_000, usedBytes: 12_300_000_000, freeBytes: 19_700_000_000, usedPercent: 38 };
-  const out = renderMemory(ctx);
+  const out = renderBody(memoryWidget, ctx);
   // brightBlue = \x1b[94m (usage default)
   expect(out).toContain("\x1b[94m");
   expect(out).not.toContain("\x1b[33m"); // not yellow
@@ -518,7 +527,7 @@ test("custom warningThreshold flows through to context renderer", () => {
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.warningThreshold = 40;
   ctx.config.display.criticalThreshold = 90;
-  const out = renderContext(ctx);
+  const out = renderBody(contextWidget, ctx);
   expect(out).toContain("\x1b[33m"); // yellow at 50% with warning=40
 });
 
@@ -527,7 +536,7 @@ test("duration line shows session time", () => {
   stdin.cost = { total_duration_ms: 5 * 60_000 };
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showDuration = true;
-  const out = renderDuration(ctx);
+  const out = renderBody(durationWidget, ctx);
   expect(out).toContain("⏱");
   expect(out).toContain("5m");
 });
@@ -535,7 +544,7 @@ test("duration line shows session time", () => {
 test("duration line null when toggle off", () => {
   const stdin = fx("stdin-anthropic-pro.json");
   const ctx = makeCtx(stdin, "anthropic");
-  expect(renderDuration(ctx)).toBeNull();
+  expect(renderBody(durationWidget, ctx)).toBeNull();
 });
 
 test("project line includes effort level when showEffortLevel and effortLevel set", () => {
@@ -543,7 +552,7 @@ test("project line includes effort level when showEffortLevel and effortLevel se
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.display.showEffortLevel = true;
   ctx.effortLevel = "max";
-  const out = renderProject(ctx);
+  const out = renderBody(projectWidget, ctx);
   expect(out).toContain("max");
   expect(out).toContain("effort:");
 });
@@ -553,7 +562,7 @@ test("git block includes ahead/behind when showAheadBehind", () => {
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.gitStatus.showAheadBehind = true;
   ctx.gitStatus = { branch: "main", dirty: false, ahead: 3, behind: 1 };
-  const out = renderProject(ctx);
+  const out = renderBody(projectWidget, ctx);
   expect(out).toMatch(/main.*↑3.*↓1/);
 });
 
@@ -562,7 +571,7 @@ test("git block omits ahead/behind when both zero", () => {
   const ctx = makeCtx(stdin, "anthropic");
   ctx.config.gitStatus.showAheadBehind = true;
   ctx.gitStatus = { branch: "main", dirty: false, ahead: 0, behind: 0 };
-  const out = renderProject(ctx);
+  const out = renderBody(projectWidget, ctx);
   expect(out).not.toContain("↑");
   expect(out).not.toContain("↓");
 });
@@ -579,7 +588,7 @@ test("usage line shows reset label when showResetLabel + timeFormat=relative", (
     fiveHourResetAt: new Date(Date.now() + 3_600_000),
     sevenDayResetAt: null,
   };
-  const out = renderUsage(ctx);
+  const out = renderBody(usageWidget, ctx);
   expect(out).toMatch(/resets in/);
   expect(out).toMatch(/~1h|~59m/);
 });
@@ -596,7 +605,7 @@ test("usage line omits reset label when showResetLabel=false", () => {
     fiveHourResetAt: new Date(Date.now() + 3_600_000),
     sevenDayResetAt: null,
   };
-  const out = renderUsage(ctx);
+  const out = renderBody(usageWidget, ctx);
   expect(out).not.toMatch(/resets/);
 });
 

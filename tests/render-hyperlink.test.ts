@@ -45,4 +45,14 @@ describe("link (OSC 8 hyperlink)", () => {
     const out = link("x", "https://x.com");
     expect(out.endsWith("\x1b]8;;\x07")).toBe(true);
   });
+
+  test("BEL in url falls back to plain text (BEL sanitization)", () => {
+    // A URL containing BEL (\x07) would terminate the OSC 8 sequence early,
+    // corrupting terminal output. We fall back to plain text instead of emitting
+    // a broken escape sequence.
+    const url = "https://example.com/path\x07injected";
+    const out = link("safe-text", url);
+    expect(out).toBe("safe-text");
+    expect(out).not.toContain("\x1b]8;;");
+  });
 });

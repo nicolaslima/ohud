@@ -104,26 +104,35 @@ src/
 ├── doctor.ts           # /ohud doctor logic
 ├── types.ts            # All cross-module types (HudConfig, RenderContext, etc.)
 └── render/
-    ├── index.ts        # Orchestrator — calls each line renderer in order
+    ├── index.ts        # Orchestrator — collects Widget cells, dispatches to Layout
+    ├── widget.ts       # Widget + WidgetCell + HushCell interfaces
     ├── colors.ts       # ANSI color helper, NO_COLOR/TERM=dumb gating
+    ├── dim.ts          # dim(text, env) helper — SGR 2 with NO_COLOR guard
+    ├── spinner.ts      # spinnerFrame(now, mode) — pure function, 4-frame cycle
+    ├── hyperlink.ts    # link(text, url) — OSC 8 escape, BEL sanitization
     ├── width.ts        # wcwidth + truncateLine for terminal-width clamping
     ├── glyphs.ts       # Unicode/ASCII fallback (LANG-detected)
-    └── lines/
-        ├── project.ts      # [model] │ path │ git:(...) │ effort
-        ├── context.ts      # Context bar with %
-        ├── api-time.ts     # API ⏱ duration (Ollama mode)
-        ├── usage.ts        # 5h/7d bars (Anthropic mode)
-        ├── cost.ts         # Session cost
-        ├── prompt-cache.ts # Cache hit %
-        ├── tools.ts        # Tool invocations summary
-        ├── agents.ts       # Sub-agent activity
-        ├── todos.ts        # In-progress todo
-        ├── memory.ts       # System RAM
-        ├── environment.ts  # CLAUDE.md / settings counts
-        └── duration.ts     # Session duration
+    ├── widgets/
+    │   ├── index.ts        # WIDGETS registry + visibleWidgets(config)
+    │   ├── project.ts      # name + branch + model (3 sub-cells in Hush)
+    │   ├── context.ts      # Context bar (Row) / % text (Hush)
+    │   ├── api-time.ts     # API ⏱ duration (Ollama mode)
+    │   ├── usage.ts        # 5h/7d bars (Anthropic mode)
+    │   ├── cost.ts         # Session cost (null in Hush)
+    │   ├── prompt-cache.ts # Cache TTL remaining
+    │   ├── tools.ts        # Tool invocations (spinner cells in Hush)
+    │   ├── agents.ts       # Sub-agent activity (spinner cells in Hush)
+    │   ├── todos.ts        # In-progress todo
+    │   ├── memory.ts       # System RAM (null in Hush)
+    │   ├── environment.ts  # CLAUDE.md / settings counts (null in Hush)
+    │   └── duration.ts     # Session duration
+    └── layout/
+        ├── index.ts        # Layout interface + LAYOUTS registry (row | hush)
+        ├── row.ts          # RowLayout — full ANSI, bars, pipes
+        └── hush.ts         # HushLayout — dimming, suppression, compact-when-idle
 ```
 
-The `src/render/lines/*.ts` files are **independent**: each takes a `RenderContext`, returns `string | null`, and imports only `colors.ts`, `width.ts`, `glyphs.ts`, and shared types. No line renderer ever imports another line renderer.
+The widgets in `src/render/widgets/*.ts` are **independent**: each takes a `RenderContext`, returns a `WidgetCell | null` (for Row) or a `HushCell | HushCell[] | null` (for Hush), and imports only shared helpers and types. No widget ever imports another widget.
 
 ## RenderContext — the single bag
 
@@ -145,6 +154,27 @@ interface RenderContext {
 ```
 
 Each line renderer receives this `ctx` and decides what to emit (or `null` to skip). Mode is the primary discriminator — Ollama-mode lines return `null` if `ctx.mode !== "ollama"` and vice versa.
+
+## Layout strategies
+
+ohud ships two layout strategies, selectable via `display.layout` in your config:
+
+**RowLayout** (`"row"`, the default) consumes `WidgetCell` objects from `widget.render(ctx)`. It replicates the original renderer behavior: full ANSI colors, progress bars (`█░`), pipe separators (`│`), merge groups (`context + apiTime` on one line). Output is byte-identical to pre-refactor ohud for the same config.
+
+**HushLayout** (`"hush"`) consumes `HushCell` objects from `widget.renderHush(ctx)`. It applies three principles: conditional bracket suppression (no orphan separators), contextual dimming (only threshold-crossed values get full color), and compact-when-idle (single line when nothing is active). See [hush-philosophy.md](hush-philosophy.md) for the full design rationale.
+
+The Strategy pattern here means: **Widgets know what data to extract; Layouts know how to arrange and style it.** A widget's `renderHush()` returns plain text plus metadata (`attention`, `baseColor`, `link`, `animate`). HushLayout applies all ANSI based on that metadata — widgets never embed color codes in Hush mode.
+
+```
+Widget.render(ctx)    → WidgetCell { body: "<ANSI string>", visualWidth }
+                                       ↓
+                              RowLayout.pack(cells) → string[]
+
+Widget.renderHush(ctx) → HushCell { text: "plain", attention, baseColor, link, animate }
+                                       ↓
+                           HushLayout.pack(cells) → string[]
+                           (applies dim/color/OSC8/spinner)
+```
 
 ## Plugin lifecycle
 

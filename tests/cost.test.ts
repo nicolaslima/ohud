@@ -1,9 +1,15 @@
 // tests/cost.test.ts
 import { test, expect } from "bun:test";
 import { resolveSessionCost, formatUsd } from "../src/cost.js";
-import { renderCost } from "../src/render/lines/cost.js";
+import { costWidget } from "../src/render/widgets/cost.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { RenderContext, StdinData, SessionTokens } from "../src/types.js";
+
+/** Helper: call costWidget.render(ctx) and return body or null */
+function renderCost(ctx: RenderContext): string | null {
+  const cell = costWidget.render(ctx);
+  return cell ? cell.body : null;
+}
 
 function makeAnthropicCtx(): RenderContext {
   return {

@@ -70,6 +70,24 @@ Fields under `display` control which line modules emit and how they format. Defa
 |---|---|---|---|
 | `promptCacheTtlSeconds` | `number` | `300` | TTL for the prompt-cache calculation logic. |
 
+### Layout strategy
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `layout` | `"row" \| "hush"` | `"row"` | Layout engine. `"row"` is the original verbose bar-chart layout. `"hush"` is the Pure-inspired minimalist layout with contextual dimming, conditional suppression, and compact-when-idle. See [explanation/hush-philosophy.md](../explanation/hush-philosophy.md). |
+
+### Hush layout options
+
+The `hush` sub-object is only meaningful when `display.layout: "hush"`. All fields are optional; omitting them applies the defaults.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `hush.compactWhenIdle` | `boolean` | `true` | Collapse to a single line when no activity-group widgets emit output (no tools, agents, or todos active). `false` always emits two lines. |
+| `hush.thresholds.warning` | `number` | `display.warningThreshold` | Override the warning percent threshold for Hush widgets (context %, usage %). Defaults to the global `warningThreshold` (60). |
+| `hush.thresholds.danger` | `number` | `display.criticalThreshold` | Override the danger percent threshold for Hush widgets. Defaults to the global `criticalThreshold` (75). |
+| `hush.hyperlinks` | `boolean` | `true` | Emit OSC 8 hyperlinks on identity widgets (project name → `file://`, branch → remote URL, model → Anthropic docs). Set `false` for terminals that mishandle OSC 8. |
+| `hush.animate` | `boolean` | `true` | Animate the spinner glyph (`◑` cycling `◐◓◑◒` at 1 Hz) for running tools and agents. Set `false` to keep cell content without animation. |
+
 ### Glyph rendering
 
 | Field | Type | Default | Notes |

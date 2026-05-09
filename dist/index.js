@@ -772,15 +772,16 @@ var NAMED = {
   brightBlue: "\x1B[94m",
   brightMagenta: "\x1B[95m"
 };
-function colorDisabled() {
-  if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== "")
+function isColorDisabled(env) {
+  const e = env ?? process.env;
+  if (e.NO_COLOR !== undefined && e.NO_COLOR !== "")
     return true;
-  if (process.env.TERM === "dumb")
+  if (e.TERM === "dumb")
     return true;
   return false;
 }
 function color(spec, text) {
-  if (colorDisabled())
+  if (isColorDisabled())
     return text;
   if (NAMED[spec])
     return `${NAMED[spec]}${text}${RESET}`;
@@ -844,70 +845,6 @@ function glyph(key, mode) {
 function basename(p) {
   const parts = p.split("/").filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1] : "";
-}
-
-// src/render/lines/project.ts
-function renderProject(ctx) {
-  const c = ctx.config;
-  const modelLabel = modelBadge(ctx);
-  const projectLabel = projectPath(ctx);
-  const gitLabel = gitBlock(ctx);
-  const effortLabel = effortBlock(ctx);
-  const parts = [];
-  if (c.display.showModel && modelLabel)
-    parts.push(color(c.colors.model, `[${modelLabel}]`));
-  if (projectLabel)
-    parts.push(color(c.colors.project, projectLabel));
-  if (gitLabel)
-    parts.push(gitLabel);
-  if (effortLabel)
-    parts.push(effortLabel);
-  return parts.join(color(c.colors.label, ` ${glyph("sep", c.display.glyphs)} `));
-}
-function modelBadge(ctx) {
-  const name = ctx.stdin.model?.display_name ?? ctx.stdin.model?.id ?? "model";
-  if (ctx.mode !== "ollama")
-    return name;
-  const cloudInfo = ctx.cloudModels.find((m) => m.name === ctx.stdin.model?.id || m.model === ctx.stdin.model?.id);
-  const param = cloudInfo?.details?.parameter_size;
-  return param ? `${name} ${glyph("bolt", ctx.config.display.glyphs)} ${param}` : name;
-}
-function projectPath(ctx) {
-  const projectDir = ctx.stdin.workspace?.project_dir?.trim() ?? "";
-  if (projectDir) {
-    const base = basename(projectDir);
-    if (base)
-      return base;
-  }
-  const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd ?? "";
-  if (!dir)
-    return "";
-  const parts = dir.split("/").filter(Boolean);
-  const n = ctx.config.pathLevels;
-  return parts.slice(-n).join("/");
-}
-function gitBlock(ctx) {
-  if (!ctx.config.gitStatus.enabled || !ctx.gitStatus)
-    return "";
-  const c = ctx.config.colors;
-  const wrapper = (s) => color(c.git, s);
-  const dirtyMark = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty ? "*" : "";
-  const branch = color(c.gitBranch, ctx.gitStatus.branch + dirtyMark);
-  let aheadBehind = "";
-  if (ctx.config.gitStatus.showAheadBehind) {
-    const a = ctx.gitStatus.ahead;
-    const b = ctx.gitStatus.behind;
-    if (a > 0 || b > 0) {
-      const aColor = ctx.config.gitStatus.pushCriticalThreshold > 0 && a >= ctx.config.gitStatus.pushCriticalThreshold ? c.critical : ctx.config.gitStatus.pushWarningThreshold > 0 && a >= ctx.config.gitStatus.pushWarningThreshold ? c.warning : c.gitBranch;
-      aheadBehind = ` ${color(aColor, `${glyph("up", ctx.config.display.glyphs)}${a}`)} ${color(c.gitBranch, `${glyph("down", ctx.config.display.glyphs)}${b}`)}`;
-    }
-  }
-  return `${wrapper("git:(")}${branch}${aheadBehind}${wrapper(")")}`;
-}
-function effortBlock(ctx) {
-  if (!ctx.config.display.showEffortLevel || !ctx.effortLevel)
-    return "";
-  return color(ctx.config.colors.label, `effort:${ctx.effortLevel}`);
 }
 
 // src/render/width.ts
@@ -1056,6 +993,68 @@ var projectWidget = {
     return cells;
   }
 };
+function renderProject(ctx) {
+  const c = ctx.config;
+  const modelLabel = modelBadge(ctx);
+  const projectLabel = projectPath(ctx);
+  const gitLabel = gitBlock(ctx);
+  const effortLabel = effortBlock(ctx);
+  const parts = [];
+  if (c.display.showModel && modelLabel)
+    parts.push(color(c.colors.model, `[${modelLabel}]`));
+  if (projectLabel)
+    parts.push(color(c.colors.project, projectLabel));
+  if (gitLabel)
+    parts.push(gitLabel);
+  if (effortLabel)
+    parts.push(effortLabel);
+  return parts.join(color(c.colors.label, ` ${glyph("sep", c.display.glyphs)} `));
+}
+function modelBadge(ctx) {
+  const name = ctx.stdin.model?.display_name ?? ctx.stdin.model?.id ?? "model";
+  if (ctx.mode !== "ollama")
+    return name;
+  const cloudInfo = ctx.cloudModels.find((m) => m.name === ctx.stdin.model?.id || m.model === ctx.stdin.model?.id);
+  const param = cloudInfo?.details?.parameter_size;
+  return param ? `${name} ${glyph("bolt", ctx.config.display.glyphs)} ${param}` : name;
+}
+function projectPath(ctx) {
+  const projectDir = ctx.stdin.workspace?.project_dir?.trim() ?? "";
+  if (projectDir) {
+    const base = basename(projectDir);
+    if (base)
+      return base;
+  }
+  const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd ?? "";
+  if (!dir)
+    return "";
+  const parts = dir.split("/").filter(Boolean);
+  const n = ctx.config.pathLevels;
+  return parts.slice(-n).join("/");
+}
+function gitBlock(ctx) {
+  if (!ctx.config.gitStatus.enabled || !ctx.gitStatus)
+    return "";
+  const c = ctx.config.colors;
+  const wrapper = (s) => color(c.git, s);
+  const dirtyMark = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty ? "*" : "";
+  const branch = color(c.gitBranch, ctx.gitStatus.branch + dirtyMark);
+  let aheadBehind = "";
+  if (ctx.config.gitStatus.showAheadBehind) {
+    const a = ctx.gitStatus.ahead;
+    const b = ctx.gitStatus.behind;
+    if (a > 0 || b > 0) {
+      const aColor = ctx.config.gitStatus.pushCriticalThreshold > 0 && a >= ctx.config.gitStatus.pushCriticalThreshold ? c.critical : ctx.config.gitStatus.pushWarningThreshold > 0 && a >= ctx.config.gitStatus.pushWarningThreshold ? c.warning : c.gitBranch;
+      aheadBehind = ` ${color(aColor, `${glyph("up", ctx.config.display.glyphs)}${a}`)} ${color(c.gitBranch, `${glyph("down", ctx.config.display.glyphs)}${b}`)}`;
+    }
+  }
+  return `${wrapper("git:(")}${branch}${aheadBehind}${wrapper(")")}`;
+}
+function effortBlock(ctx) {
+  if (!ctx.config.display.showEffortLevel || !ctx.effortLevel)
+    return "";
+  return color(ctx.config.colors.label, `effort:${ctx.effortLevel}`);
+}
 function condenseModelId(nameOrId) {
   let s = nameOrId.trim();
   if (s.toLowerCase().startsWith("claude-"))
@@ -1093,7 +1092,35 @@ function barColorForPercent(pct, palette, thresholds = { warning: 60, critical: 
   return palette.default;
 }
 
-// src/render/lines/context.ts
+// src/render/widgets/context.ts
+var contextWidget = {
+  id: "context",
+  group: "metrics",
+  priority: 90,
+  minWidth: 22,
+  render(ctx) {
+    const body = renderContext(ctx);
+    if (body == null)
+      return null;
+    return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    if (!ctx.config.display.showContextBar)
+      return null;
+    const pct = ctx.stdin.context_window?.used_percentage;
+    if (typeof pct !== "number" || !Number.isFinite(pct))
+      return null;
+    const rounded = Math.round(pct);
+    const warn = ctx.config.display.hush?.thresholds?.warning ?? ctx.config.display.warningThreshold;
+    const crit = ctx.config.display.hush?.thresholds?.danger ?? ctx.config.display.criticalThreshold;
+    const attention = rounded >= crit ? "danger" : rounded >= warn ? "warning" : "muted";
+    return {
+      group: "metrics",
+      text: `${rounded}%`,
+      attention
+    };
+  }
+};
 var BAR_WIDTH = 10;
 function renderContext(ctx) {
   if (!ctx.config.display.showContextBar)
@@ -1134,61 +1161,6 @@ function formatValue(ctx, rounded) {
   }
 }
 
-// src/render/widgets/context.ts
-var contextWidget = {
-  id: "context",
-  group: "metrics",
-  priority: 90,
-  minWidth: 22,
-  render(ctx) {
-    const body = renderContext(ctx);
-    if (body == null)
-      return null;
-    return { body, visualWidth: maxLineWidth(body) };
-  },
-  renderHush(ctx) {
-    if (!ctx.config.display.showContextBar)
-      return null;
-    const pct = ctx.stdin.context_window?.used_percentage;
-    if (typeof pct !== "number" || !Number.isFinite(pct))
-      return null;
-    const rounded = Math.round(pct);
-    const warn = ctx.config.display.hush?.thresholds?.warning ?? ctx.config.display.warningThreshold;
-    const crit = ctx.config.display.hush?.thresholds?.danger ?? ctx.config.display.criticalThreshold;
-    const attention = rounded >= crit ? "danger" : rounded >= warn ? "warning" : "muted";
-    return {
-      group: "metrics",
-      text: `${rounded}%`,
-      attention
-    };
-  }
-};
-
-// src/render/lines/api-time.ts
-function renderApiTime(ctx) {
-  if (ctx.mode !== "ollama")
-    return null;
-  if (!ctx.config.display.showApiTime)
-    return null;
-  const c = ctx.config.colors;
-  const apiMs = ctx.stdin.cost?.total_api_duration_ms;
-  if (typeof apiMs === "number" && apiMs > 0) {
-    return `${color(c.label, "API")} ${color(c.apiTime, `${glyph("clock", ctx.config.display.glyphs)} ${formatDuration(apiMs)}`)}`;
-  }
-  return null;
-}
-function formatDuration(ms) {
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor(totalSec % 3600 / 60);
-  const s = totalSec % 60;
-  if (h > 0)
-    return `${h}h ${m}m ${s}s`;
-  if (m > 0)
-    return `${m}m ${s}s`;
-  return `${s}s`;
-}
-
 // src/render/widgets/api-time.ts
 var apiTimeWidget = {
   id: "apiTime",
@@ -1224,8 +1196,73 @@ function formatApiTime(ms) {
   }
   return `${Math.round(ms)}ms`;
 }
+function renderApiTime(ctx) {
+  if (ctx.mode !== "ollama")
+    return null;
+  if (!ctx.config.display.showApiTime)
+    return null;
+  const c = ctx.config.colors;
+  const apiMs = ctx.stdin.cost?.total_api_duration_ms;
+  if (typeof apiMs === "number" && apiMs > 0) {
+    return `${color(c.label, "API")} ${color(c.apiTime, `${glyph("clock", ctx.config.display.glyphs)} ${formatDuration(apiMs)}`)}`;
+  }
+  return null;
+}
+function formatDuration(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor(totalSec % 3600 / 60);
+  const s = totalSec % 60;
+  if (h > 0)
+    return `${h}h ${m}m ${s}s`;
+  if (m > 0)
+    return `${m}m ${s}s`;
+  return `${s}s`;
+}
 
-// src/render/lines/usage.ts
+// src/render/widgets/usage.ts
+var usageWidget = {
+  id: "usage",
+  group: "metrics",
+  priority: 80,
+  minWidth: 22,
+  render(ctx) {
+    const body = renderUsage(ctx);
+    if (body == null)
+      return null;
+    return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    if (ctx.mode !== "anthropic")
+      return null;
+    if (!ctx.config.display.showUsage)
+      return null;
+    if (!ctx.usageData)
+      return null;
+    const { fiveHour, sevenDay } = ctx.usageData;
+    const warn = ctx.config.display.hush?.thresholds?.warning ?? ctx.config.display.warningThreshold;
+    const crit = ctx.config.display.hush?.thresholds?.danger ?? ctx.config.display.criticalThreshold;
+    const fiveHourPct = fiveHour ?? 0;
+    const sevenDayPct = sevenDay ?? 0;
+    if (fiveHourPct < 50 && sevenDayPct < 50)
+      return null;
+    const parts = [];
+    if (fiveHour !== null)
+      parts.push(`5h ${fiveHour}%`);
+    if (sevenDay !== null && sevenDay >= ctx.config.display.sevenDayThreshold) {
+      parts.push(`7d ${sevenDay}%`);
+    }
+    if (parts.length === 0)
+      return null;
+    const maxPct = Math.max(fiveHourPct, sevenDayPct);
+    const attention = maxPct >= crit ? "danger" : maxPct >= warn ? "warning" : maxPct >= 50 ? "normal" : "muted";
+    return {
+      group: "metrics",
+      text: parts.join(" "),
+      attention
+    };
+  }
+};
 var BAR_WIDTH2 = 10;
 function renderUsage(ctx) {
   if (ctx.mode !== "anthropic")
@@ -1290,65 +1327,6 @@ function relativeTime(ms) {
   return remM > 0 ? `~${h}h${remM}m` : `~${h}h`;
 }
 
-// src/render/widgets/usage.ts
-var usageWidget = {
-  id: "usage",
-  group: "metrics",
-  priority: 80,
-  minWidth: 22,
-  render(ctx) {
-    const body = renderUsage(ctx);
-    if (body == null)
-      return null;
-    return { body, visualWidth: maxLineWidth(body) };
-  },
-  renderHush(ctx) {
-    if (ctx.mode !== "anthropic")
-      return null;
-    if (!ctx.config.display.showUsage)
-      return null;
-    if (!ctx.usageData)
-      return null;
-    const { fiveHour, sevenDay } = ctx.usageData;
-    const warn = ctx.config.display.hush?.thresholds?.warning ?? ctx.config.display.warningThreshold;
-    const crit = ctx.config.display.hush?.thresholds?.danger ?? ctx.config.display.criticalThreshold;
-    const fiveHourPct = fiveHour ?? 0;
-    const sevenDayPct = sevenDay ?? 0;
-    if (fiveHourPct < 50 && sevenDayPct < 50)
-      return null;
-    const parts = [];
-    if (fiveHour !== null)
-      parts.push(`5h ${fiveHour}%`);
-    if (sevenDay !== null && sevenDay >= ctx.config.display.sevenDayThreshold) {
-      parts.push(`7d ${sevenDay}%`);
-    }
-    if (parts.length === 0)
-      return null;
-    const maxPct = Math.max(fiveHourPct, sevenDayPct);
-    const attention = maxPct >= crit ? "danger" : maxPct >= warn ? "warning" : maxPct >= 50 ? "normal" : "muted";
-    return {
-      group: "metrics",
-      text: parts.join(" "),
-      attention
-    };
-  }
-};
-
-// src/render/lines/cost.ts
-function renderCost(ctx) {
-  if (ctx.mode !== "anthropic")
-    return null;
-  if (!ctx.costData)
-    return null;
-  if (!ctx.config.display.showCost) {
-    if (ctx.costData.source !== "native" || ctx.costData.totalUsd <= 0)
-      return null;
-  }
-  const c = ctx.config.colors;
-  const suffix = ctx.costData.source === "estimate" ? color(c.label, " (est)") : "";
-  return `${color(c.label, "Cost")} ${color(c.label, formatUsd(ctx.costData.totalUsd))}${suffix}`;
-}
-
 // src/render/widgets/cost.ts
 var costWidget = {
   id: "cost",
@@ -1365,6 +1343,19 @@ var costWidget = {
     return null;
   }
 };
+function renderCost(ctx) {
+  if (ctx.mode !== "anthropic")
+    return null;
+  if (!ctx.costData)
+    return null;
+  if (!ctx.config.display.showCost) {
+    if (ctx.costData.source !== "native" || ctx.costData.totalUsd <= 0)
+      return null;
+  }
+  const c = ctx.config.colors;
+  const suffix = ctx.costData.source === "estimate" ? color(c.label, " (est)") : "";
+  return `${color(c.label, "Cost")} ${color(c.label, formatUsd(ctx.costData.totalUsd))}${suffix}`;
+}
 
 // src/prompt-cache.ts
 function promptCacheRemainingMs(lastResponseAt, ttlSeconds, now = Date.now) {
@@ -1381,19 +1372,6 @@ function formatPromptCache(remainingMs) {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return m === 0 ? `${s}s` : `${m}m ${s}s`;
-}
-
-// src/render/lines/prompt-cache.ts
-function renderPromptCache(ctx) {
-  if (ctx.mode !== "anthropic")
-    return null;
-  if (!ctx.config.display.showPromptCache)
-    return null;
-  const remaining = promptCacheRemainingMs(ctx.transcript.lastAssistantResponseAt, ctx.config.display.promptCacheTtlSeconds);
-  if (remaining === null)
-    return null;
-  const c = ctx.config.colors;
-  return `${color(c.label, "cache")} ${color(c.label, formatPromptCache(remaining))}`;
 }
 
 // src/render/widgets/prompt-cache.ts
@@ -1425,8 +1403,34 @@ var promptCacheWidget = {
     };
   }
 };
+function renderPromptCache(ctx) {
+  if (ctx.mode !== "anthropic")
+    return null;
+  if (!ctx.config.display.showPromptCache)
+    return null;
+  const remaining = promptCacheRemainingMs(ctx.transcript.lastAssistantResponseAt, ctx.config.display.promptCacheTtlSeconds);
+  if (remaining === null)
+    return null;
+  const c = ctx.config.colors;
+  return `${color(c.label, "cache")} ${color(c.label, formatPromptCache(remaining))}`;
+}
 
-// src/render/lines/memory.ts
+// src/render/widgets/memory.ts
+var memoryWidget = {
+  id: "memory",
+  group: "metrics",
+  priority: 50,
+  minWidth: 18,
+  render(ctx) {
+    const body = renderMemory(ctx);
+    if (body == null)
+      return null;
+    return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(_ctx) {
+    return null;
+  }
+};
 var BAR_WIDTH3 = 10;
 function renderMemory(ctx) {
   if (!ctx.config.display.showMemoryUsage)
@@ -1449,55 +1453,6 @@ function renderMemory(ctx) {
   const usedGb = (ctx.memoryInfo.usedBytes / 1e9).toFixed(1);
   const totalGb = (ctx.memoryInfo.totalBytes / 1e9).toFixed(1);
   return `${color(c.label, "RAM")} ${color(barColor, bar)} ${color(c.label, `${ctx.memoryInfo.usedPercent}% (${usedGb} GB / ${totalGb} GB)`)}`;
-}
-
-// src/render/widgets/memory.ts
-var memoryWidget = {
-  id: "memory",
-  group: "metrics",
-  priority: 50,
-  minWidth: 18,
-  render(ctx) {
-    const body = renderMemory(ctx);
-    if (body == null)
-      return null;
-    return { body, visualWidth: maxLineWidth(body) };
-  },
-  renderHush(_ctx) {
-    return null;
-  }
-};
-
-// src/render/lines/duration.ts
-function renderDuration(ctx) {
-  const showDuration = ctx.config.display.showDuration;
-  const showSpeed = ctx.config.display.showSpeed;
-  if (!showDuration && !showSpeed)
-    return null;
-  const c = ctx.config.colors;
-  const parts = [];
-  if (showDuration) {
-    const ms = ctx.stdin.cost?.total_duration_ms;
-    if (typeof ms === "number" && ms > 0)
-      parts.push(`⏱ ${formatHms(ms)}`);
-  }
-  if (showSpeed) {
-    const tps = computeTokensPerSecond(ctx);
-    if (tps !== null)
-      parts.push(`out: ${tps.toFixed(1)} tok/s`);
-  }
-  if (parts.length === 0)
-    return null;
-  return color(c.label, parts.join(" | "));
-}
-function formatHms(ms) {
-  const total = Math.floor(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return m > 0 ? `${m}m` : `${s}s`;
-}
-function computeTokensPerSecond(_ctx) {
-  return null;
 }
 
 // src/render/widgets/duration.ts
@@ -1540,8 +1495,98 @@ function formatDurationHush(ms) {
     return `${h}h`;
   return `${m}m`;
 }
+function renderDuration(ctx) {
+  const showDuration = ctx.config.display.showDuration;
+  const showSpeed = ctx.config.display.showSpeed;
+  if (!showDuration && !showSpeed)
+    return null;
+  const c = ctx.config.colors;
+  const parts = [];
+  if (showDuration) {
+    const ms = ctx.stdin.cost?.total_duration_ms;
+    if (typeof ms === "number" && ms > 0)
+      parts.push(`⏱ ${formatHms(ms)}`);
+  }
+  if (showSpeed) {
+    const tps = computeTokensPerSecond(ctx);
+    if (tps !== null)
+      parts.push(`out: ${tps.toFixed(1)} tok/s`);
+  }
+  if (parts.length === 0)
+    return null;
+  return color(c.label, parts.join(" | "));
+}
+function formatHms(ms) {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m > 0 ? `${m}m` : `${s}s`;
+}
+function computeTokensPerSecond(_ctx) {
+  return null;
+}
 
-// src/render/lines/tools.ts
+// src/render/widgets/tools.ts
+var toolsWidget = {
+  id: "tools",
+  group: "activity",
+  priority: 90,
+  minWidth: 16,
+  render(ctx) {
+    const body = renderTools(ctx);
+    if (body == null)
+      return null;
+    return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(ctx) {
+    if (!ctx.config.display.showTools)
+      return null;
+    const tools = ctx.transcript.tools;
+    if (tools.length === 0)
+      return null;
+    const running = tools.filter((t) => t.status === "running");
+    const done = tools.filter((t) => t.status === "completed");
+    const cells = [];
+    for (const g of groupByName(running).values()) {
+      const countSuffix = g.count > 1 ? ` ×${g.count}` : "";
+      cells.push({
+        group: "activity",
+        text: `${g.name}${countSuffix}`,
+        attention: "normal",
+        baseColor: "cyan",
+        animate: "spinner"
+      });
+    }
+    const tally = countByName(done);
+    for (const [name, count] of tally) {
+      const countSuffix = count > 1 ? ` ×${count}` : "";
+      cells.push({
+        group: "activity",
+        text: `✓ ${name}${countSuffix}`,
+        attention: "muted",
+        baseColor: "green"
+      });
+    }
+    return cells.length > 0 ? cells : null;
+  }
+};
+function groupByName(entries) {
+  const out = new Map;
+  for (const t of entries) {
+    const existing = out.get(t.name);
+    if (existing)
+      existing.count += 1;
+    else
+      out.set(t.name, { name: t.name, count: 1 });
+  }
+  return out;
+}
+function countByName(entries) {
+  const m = new Map;
+  for (const e of entries)
+    m.set(e.name, (m.get(e.name) ?? 0) + 1);
+  return m;
+}
 function renderTools(ctx) {
   if (!ctx.config.display.showTools)
     return null;
@@ -1580,50 +1625,44 @@ function groupRunning(entries) {
   }
   return out;
 }
-function countByName(entries) {
-  const m = new Map;
-  for (const e of entries)
-    m.set(e.name, (m.get(e.name) ?? 0) + 1);
-  return m;
-}
 
-// src/render/widgets/tools.ts
-var toolsWidget = {
-  id: "tools",
+// src/render/widgets/agents.ts
+var agentsWidget = {
+  id: "agents",
   group: "activity",
-  priority: 90,
+  priority: 85,
   minWidth: 16,
   render(ctx) {
-    const body = renderTools(ctx);
+    const body = renderAgents(ctx);
     if (body == null)
       return null;
     return { body, visualWidth: maxLineWidth(body) };
   },
   renderHush(ctx) {
-    if (!ctx.config.display.showTools)
+    if (!ctx.config.display.showAgents)
       return null;
-    const tools = ctx.transcript.tools;
-    if (tools.length === 0)
+    const agents = ctx.transcript.agents;
+    if (agents.length === 0)
       return null;
-    const running = tools.filter((t) => t.status === "running");
-    const done = tools.filter((t) => t.status === "completed");
+    const running = agents.filter((a) => a.status === "running");
+    const completed = agents.filter((a) => a.status === "completed");
     const cells = [];
-    for (const g of groupByName(running).values()) {
-      const countSuffix = g.count > 1 ? ` ×${g.count}` : "";
+    for (const a of running) {
+      const modelTag = a.model ? ` [${a.model}]` : "";
       cells.push({
         group: "activity",
-        text: `${g.name}${countSuffix}`,
+        text: `${a.type}${modelTag}`,
         attention: "normal",
         baseColor: "cyan",
         animate: "spinner"
       });
     }
-    const tally = countByName2(done);
-    for (const [name, count] of tally) {
+    const tally = countByType(completed);
+    for (const [type, count] of tally) {
       const countSuffix = count > 1 ? ` ×${count}` : "";
       cells.push({
         group: "activity",
-        text: `✓ ${name}${countSuffix}`,
+        text: `✓ ${type}${countSuffix}`,
         attention: "muted",
         baseColor: "green"
       });
@@ -1631,25 +1670,6 @@ var toolsWidget = {
     return cells.length > 0 ? cells : null;
   }
 };
-function groupByName(entries) {
-  const out = new Map;
-  for (const t of entries) {
-    const existing = out.get(t.name);
-    if (existing)
-      existing.count += 1;
-    else
-      out.set(t.name, { name: t.name, count: 1 });
-  }
-  return out;
-}
-function countByName2(entries) {
-  const m = new Map;
-  for (const e of entries)
-    m.set(e.name, (m.get(e.name) ?? 0) + 1);
-  return m;
-}
-
-// src/render/lines/agents.ts
 function renderAgents(ctx) {
   if (!ctx.config.display.showAgents)
     return null;
@@ -1698,72 +1718,6 @@ function formatElapsed(start) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-// src/render/widgets/agents.ts
-var agentsWidget = {
-  id: "agents",
-  group: "activity",
-  priority: 85,
-  minWidth: 16,
-  render(ctx) {
-    const body = renderAgents(ctx);
-    if (body == null)
-      return null;
-    return { body, visualWidth: maxLineWidth(body) };
-  },
-  renderHush(ctx) {
-    if (!ctx.config.display.showAgents)
-      return null;
-    const agents = ctx.transcript.agents;
-    if (agents.length === 0)
-      return null;
-    const running = agents.filter((a) => a.status === "running");
-    const completed = agents.filter((a) => a.status === "completed");
-    const cells = [];
-    for (const a of running) {
-      const modelTag = a.model ? ` [${a.model}]` : "";
-      cells.push({
-        group: "activity",
-        text: `${a.type}${modelTag}`,
-        attention: "normal",
-        baseColor: "cyan",
-        animate: "spinner"
-      });
-    }
-    const tally = countByType2(completed);
-    for (const [type, count] of tally) {
-      const countSuffix = count > 1 ? ` ×${count}` : "";
-      cells.push({
-        group: "activity",
-        text: `✓ ${type}${countSuffix}`,
-        attention: "muted",
-        baseColor: "green"
-      });
-    }
-    return cells.length > 0 ? cells : null;
-  }
-};
-function countByType2(entries) {
-  const m = new Map;
-  for (const e of entries)
-    m.set(e.type, (m.get(e.type) ?? 0) + 1);
-  return m;
-}
-
-// src/render/lines/todos.ts
-function renderTodos(ctx) {
-  if (!ctx.config.display.showTodos)
-    return null;
-  const todos = ctx.transcript.todos;
-  if (todos.length === 0)
-    return null;
-  const total = todos.length;
-  const completed = todos.filter((t) => t.status === "completed").length;
-  const inProgress = todos.find((t) => t.status === "in_progress");
-  const c = ctx.config.colors;
-  const head = inProgress ? `${color(c.label, glyph("active", ctx.config.display.glyphs))} ${inProgress.content}` : `${color(c.label, glyph("todo", ctx.config.display.glyphs))} no active todo`;
-  return `${head} ${color(c.label, `(${completed}/${total})`)}`;
-}
-
 // src/render/widgets/todos.ts
 var todosWidget = {
   id: "todos",
@@ -1790,11 +1744,39 @@ var todosWidget = {
     };
   }
 };
+function renderTodos(ctx) {
+  if (!ctx.config.display.showTodos)
+    return null;
+  const todos = ctx.transcript.todos;
+  if (todos.length === 0)
+    return null;
+  const total = todos.length;
+  const completed = todos.filter((t) => t.status === "completed").length;
+  const inProgress = todos.find((t) => t.status === "in_progress");
+  const c = ctx.config.colors;
+  const head = inProgress ? `${color(c.label, glyph("active", ctx.config.display.glyphs))} ${inProgress.content}` : `${color(c.label, glyph("todo", ctx.config.display.glyphs))} no active todo`;
+  return `${head} ${color(c.label, `(${completed}/${total})`)}`;
+}
 
-// src/render/lines/environment.ts
+// src/render/widgets/environment.ts
 import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
 import { dirname, join as join3 } from "node:path";
 import { homedir as homedir2 } from "node:os";
+var environmentWidget = {
+  id: "environment",
+  group: "activity",
+  priority: 30,
+  minWidth: 14,
+  render(ctx) {
+    const body = renderEnvironment(ctx);
+    if (body == null)
+      return null;
+    return { body, visualWidth: maxLineWidth(body) };
+  },
+  renderHush(_ctx) {
+    return null;
+  }
+};
 function renderEnvironment(ctx) {
   if (!ctx.config.display.showConfigCounts)
     return null;
@@ -1858,23 +1840,6 @@ function readRules(startDir) {
     return 0;
   }
 }
-
-// src/render/widgets/environment.ts
-var environmentWidget = {
-  id: "environment",
-  group: "activity",
-  priority: 30,
-  minWidth: 14,
-  render(ctx) {
-    const body = renderEnvironment(ctx);
-    if (body == null)
-      return null;
-    return { body, visualWidth: maxLineWidth(body) };
-  },
-  renderHush(_ctx) {
-    return null;
-  }
-};
 
 // src/render/widgets/index.ts
 var WIDGETS = [
@@ -1981,10 +1946,8 @@ var rowLayout = {
 
 // src/render/dim.ts
 function dim(text, env) {
-  const e = env ?? process.env;
-  if (e.NO_COLOR !== undefined && e.NO_COLOR !== "" || e.TERM === "dumb") {
+  if (isColorDisabled(env))
     return text;
-  }
   return `\x1B[2m${text}\x1B[22m`;
 }
 
@@ -2000,6 +1963,8 @@ function spinnerFrame(now, mode) {
 function link(text, url, enabled = true) {
   if (!enabled || !url)
     return text;
+  if (url.includes("\x07"))
+    return text;
   return `\x1B]8;;${url}\x07${text}\x1B]8;;\x07`;
 }
 
@@ -2014,15 +1979,8 @@ var SGR_FG = {
   red: "31"
 };
 var RESET_FG = "\x1B[39m";
-function colorDisabled2(env) {
-  if (env.NO_COLOR !== undefined && env.NO_COLOR !== "")
-    return true;
-  if (env.TERM === "dumb")
-    return true;
-  return false;
-}
 function applyColor(text, colorName, env) {
-  if (colorDisabled2(env))
+  if (isColorDisabled(env))
     return text;
   const code = SGR_FG[colorName];
   if (!code)
@@ -2030,7 +1988,7 @@ function applyColor(text, colorName, env) {
   return `\x1B[${code}m${text}${RESET_FG}`;
 }
 function applyDimColor(text, colorName, env) {
-  if (colorDisabled2(env))
+  if (isColorDisabled(env))
     return text;
   if (!colorName)
     return dim(text, env);
@@ -2039,16 +1997,17 @@ function applyDimColor(text, colorName, env) {
     return dim(text, env);
   return `\x1B[2;${code}m${text}\x1B[22;39m`;
 }
-function glyphMode(config) {
+function glyphMode(config, env) {
   const g = config.display.glyphs;
   if (g === "unicode")
     return "unicode";
   if (g === "ascii")
     return "ascii";
-  const lang = process.env.LANG ?? "";
+  const e = env ?? process.env;
+  const lang = e.LANG ?? "";
   if (lang.includes("UTF-8") || lang.toLowerCase().includes("utf8"))
     return "unicode";
-  if (process.env.LC_ALL?.includes("UTF-8"))
+  if (e.LC_ALL?.includes("UTF-8"))
     return "unicode";
   return "ascii";
 }
@@ -2058,7 +2017,7 @@ function renderCell(cell, now, mode, env, toggles) {
     const glyph2 = spinnerFrame(now, mode);
     text = `${glyph2} ${text}`;
   }
-  const noColor = colorDisabled2(env);
+  const noColor = isColorDisabled(env);
   switch (cell.attention) {
     case "muted":
       text = applyDimColor(text, cell.baseColor, env);
@@ -2087,8 +2046,8 @@ var hushLayout = {
   pack(cells, termWidth, config) {
     const hushCells = cells.filter((c) => ("text" in c) && ("attention" in c));
     const now = Date.now();
-    const mode = glyphMode(config);
     const env = process.env;
+    const mode = glyphMode(config, env);
     const toggles = {
       hyperlinks: config.display.hush?.hyperlinks !== false,
       animate: config.display.hush?.animate !== false

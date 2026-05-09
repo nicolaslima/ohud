@@ -14,14 +14,14 @@ import type { HudConfig } from "./types.js";
 // (Use broader pattern "\.display\." to catch ctx.config.display.* as well.)
 // This Set will need updating after Tasks 7 (delete dead config) and 8 (implement Pilha A).
 const CONSUMED_FLAGS = new Set([
-  // Display flags read by render/lines/*.ts or src/index.ts orchestrator
+  // Display flags read by src/render/widgets/*.ts or src/render/index.ts orchestrator
   "showModel", "showContextBar", "contextValue", "showApiTime", "showUsage",
   "usageBarEnabled", "usageCompact", "showResetLabel", "timeFormat", "sevenDayThreshold",
   "externalUsagePath", "externalUsageFreshnessMs", "showCost", "showPromptCache",
   "promptCacheTtlSeconds", "showTools", "showAgents", "showTodos", "showConfigCounts",
   "showDuration", "showSpeed", "showMemoryUsage", "showEffortLevel", "glyphs",
   "layout", "hush",
-  // GitStatus flags read by render/lines/project.ts
+  // GitStatus flags read by src/render/widgets/project.ts
   "showAheadBehind", "pushWarningThreshold", "pushCriticalThreshold",
 ]);
 

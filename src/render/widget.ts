@@ -35,7 +35,8 @@ export interface HushCell {
   attention: "muted" | "normal" | "warning" | "danger";
   link?: string;                             // optional OSC 8 URL (project name / branch / model)
   animate?: "spinner" | null;               // optional animation hint: "spinner" for running activity
-  /** Optional baseline color key (cyan, green, blue, etc.) used by HushLayout for "normal" attention cells.
-   *  When absent, "normal" attention cells render without additional color (default fg). */
-  baseColor?: string;
+  /** Optional baseline color key used by HushLayout for "normal" and "muted" attention cells.
+   *  When absent, "normal" attention cells render without additional color (default fg).
+   *  Must be one of the supported SGR palette entries in HushLayout. */
+  baseColor?: "cyan" | "green" | "blue" | "magenta" | "yellow" | "red";
 }
