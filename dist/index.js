@@ -174,8 +174,8 @@ async function probeOllama(opts) {
 
 // src/doctor.ts
 import { existsSync as existsSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { join as join3 } from "node:path";
+import { homedir as homedir4 } from "node:os";
+import { join as join5 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/config.ts
@@ -229,7 +229,7 @@ var DEFAULT_CONFIG = {
     showEffortLevel: true,
     glyphs: "auto",
     layout: "row",
-    hush: { compactWhenIdle: true, hyperlinks: true, animate: true, motion: "subtle", density: "compact", identityColors: false }
+    hush: { compactWhenIdle: true, hyperlinks: true, animate: true, motion: "subtle", density: "compact", identityColors: false, icon: "auto", thresholds: { warning: 60, danger: 75 } }
   },
   gitStatus: {
     enabled: true,
@@ -730,6 +730,383 @@ function formatModelLabel(nameOrId) {
   return nameOrId.trim();
 }
 
+// src/render/layout/hush.ts
+import * as os2 from "node:os";
+import * as path2 from "node:path";
+
+// src/render/dim.ts
+function dim(text, env) {
+  if (isColorDisabled(env))
+    return text;
+  return `\x1B[2m${text}\x1B[22m`;
+}
+
+// src/render/hyperlink.ts
+function link(text, url, enabled = true) {
+  if (!enabled || !url)
+    return text;
+  if (url.includes("\x07"))
+    return text;
+  return `\x1B]8;;${url}\x07${text}\x1B]8;;\x07`;
+}
+
+// src/session-state.ts
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+var DEFAULT_CACHE_DIR = path.join(os.homedir(), ".cache/ohud/sessions");
+var WRITE_DEBOUNCE_MS = 1000;
+async function writeSessionFile(sessionId, transcript, options) {
+  const cacheDir = options?.cacheDir ?? DEFAULT_CACHE_DIR;
+  const now = options?.now ?? Date.now();
+  const filePath = path.join(cacheDir, `${sessionId}.txt`);
+  try {
+    const st = await fs.stat(filePath);
+    if (Math.abs(now - st.mtimeMs) < WRITE_DEBOUNCE_MS) {
+      return filePath;
+    }
+  } catch {}
+  await fs.mkdir(cacheDir, { recursive: true });
+  const content = formatSessionFile(sessionId, transcript);
+  await fs.writeFile(filePath, content, "utf8");
+  return filePath;
+}
+function formatSessionFile(sessionId, transcript) {
+  const lines = [];
+  lines.push(`ohud session ${sessionId}`);
+  if (transcript.sessionStart) {
+    const d = transcript.sessionStart;
+    const pad = (n) => String(n).padStart(2, "0");
+    const datePart = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const timePart = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    lines.push(`started ${datePart} ${timePart}`);
+  } else {
+    lines.push("started unknown");
+  }
+  lines.push("");
+  const toolCounts = new Map;
+  for (const tool of transcript.tools) {
+    toolCounts.set(tool.name, (toolCounts.get(tool.name) ?? 0) + 1);
+  }
+  const sortedTools = [...toolCounts.entries()].sort((a, b) => b[1] - a[1]);
+  lines.push(`Tools (total: ${transcript.tools.length}):`);
+  for (const [name, count] of sortedTools) {
+    const paddedName = name.padStart(8, " ");
+    lines.push(`  ${paddedName}    ${count}`);
+  }
+  lines.push("");
+  const errorTools = transcript.tools.filter((t) => t.hasError === true);
+  lines.push(`Errors: ${errorTools.length}`);
+  if (errorTools.length > 0) {
+    for (const tool of errorTools) {
+      const ts = tool.endTime ?? tool.startTime;
+      const pad = (n) => String(n).padStart(2, "0");
+      const timeStr = `${pad(ts.getHours())}:${pad(ts.getMinutes())}:${pad(ts.getSeconds())}`;
+      lines.push(`  - ${tool.name} error at ${timeStr}`);
+    }
+  }
+  return lines.join(`
+`) + `
+`;
+}
+
+// src/render/layout/hush.ts
+var SGR_FG = {
+  cyan: "36",
+  green: "32",
+  blue: "34",
+  magenta: "35",
+  yellow: "33",
+  red: "31"
+};
+var RESET_FG = "\x1B[39m";
+var MAX_RUNNING = 3;
+var MAX_DONE = 4;
+function applyColor(text, colorName, env) {
+  if (isColorDisabled(env))
+    return text;
+  const code = SGR_FG[colorName];
+  if (!code)
+    return text;
+  return `\x1B[${code}m${text}${RESET_FG}`;
+}
+function applyDimColor(text, colorName, env) {
+  if (isColorDisabled(env))
+    return text;
+  if (!colorName)
+    return dim(text, env);
+  const code = SGR_FG[colorName];
+  if (!code)
+    return dim(text, env);
+  return `\x1B[2;${code}m${text}\x1B[22;39m`;
+}
+function glyphMode(config, env) {
+  const g = config.display.glyphs;
+  if (g === "unicode")
+    return "unicode";
+  if (g === "ascii")
+    return "ascii";
+  const e = env ?? process.env;
+  const lang = e.LANG ?? "";
+  if (lang.includes("UTF-8") || lang.toLowerCase().includes("utf8"))
+    return "unicode";
+  if (e.LC_ALL?.includes("UTF-8"))
+    return "unicode";
+  return "ascii";
+}
+function renderActivityCell(cell, now, mode, env, toggles) {
+  const noColor = isColorDisabled(env);
+  if (cell.primaryText !== undefined && cell.secondaryText !== undefined) {
+    let primaryStyled = cell.primaryText;
+    if (!noColor && cell.baseColor) {
+      primaryStyled = applyColor(cell.primaryText, cell.baseColor, env);
+    }
+    const secondaryStyled = dim(cell.secondaryText, env);
+    let text2 = `${primaryStyled} ${secondaryStyled}`;
+    if (cell.animate === "spinner" && toggles.animate) {
+      const g = spinnerFrame(toggles.motion ? now : 0, mode);
+      text2 = `${g} ${text2}`;
+    }
+    if (cell.link) {
+      text2 = link(text2, cell.link, toggles.hyperlinks);
+    }
+    return text2;
+  }
+  let text = cell.text;
+  if (cell.animate === "spinner" && toggles.animate) {
+    const g = spinnerFrame(toggles.motion ? now : 0, mode);
+    text = `${g} ${text}`;
+  }
+  switch (cell.attention) {
+    case "muted":
+      text = applyDimColor(text, cell.baseColor, env);
+      break;
+    case "normal":
+      if (!noColor && cell.baseColor)
+        text = applyColor(text, cell.baseColor, env);
+      break;
+    case "warning":
+      if (!noColor)
+        text = `\x1B[33m${text}${RESET_FG}`;
+      break;
+    case "danger":
+      if (!noColor)
+        text = `\x1B[31m${text}${RESET_FG}`;
+      break;
+  }
+  if (cell.link) {
+    text = link(text, cell.link, toggles.hyperlinks);
+  }
+  return text;
+}
+function capActivityCells(cells) {
+  const running = cells.filter((c) => c.animate === "spinner");
+  const done = cells.filter((c) => c.animate !== "spinner");
+  const cappedRunning = running.slice(0, MAX_RUNNING);
+  const cappedDone = done.slice(0, MAX_DONE);
+  const dropped = running.length - cappedRunning.length + (done.length - cappedDone.length);
+  const result = [...cappedRunning, ...cappedDone];
+  if (dropped > 0) {
+    result.push({
+      text: `+${dropped} more`,
+      attention: "muted",
+      group: "activity"
+    });
+  }
+  return result;
+}
+function packActivityLine(cells, counterText, now, mode, env, toggles, termWidth, indent, bulletSep) {
+  const last = cells[cells.length - 1];
+  const moreMatch = last ? /^\+(\d+) more$/.exec(last.text) : null;
+  const initialMore = moreMatch ? Number.parseInt(moreMatch[1], 10) : 0;
+  const main = moreMatch ? cells.slice(0, -1) : [...cells];
+  const buildActivityStr = (cs, droppedExtra2) => {
+    const rendered = cs.map((c) => renderActivityCell(c, now, mode, env, toggles));
+    const total = initialMore + droppedExtra2;
+    if (total > 0)
+      rendered.push(dim(`+${total} more`, env));
+    let line = rendered.join(bulletSep);
+    if (counterText) {
+      line = line ? `${line}  ${counterText}` : counterText;
+    }
+    return indent + line;
+  };
+  let droppedExtra = 0;
+  let result = buildActivityStr(main, droppedExtra);
+  while (visibleWidth(result) > termWidth && main.length > 0) {
+    main.pop();
+    droppedExtra += 1;
+    result = buildActivityStr(main, droppedExtra);
+  }
+  if (visibleWidth(result) > termWidth) {
+    result = truncateLine(result, termWidth);
+  }
+  return result;
+}
+function renderMetricsCell(cell, env) {
+  const noColor = isColorDisabled(env);
+  const text = cell.text;
+  switch (cell.attention) {
+    case "warning":
+      if (!noColor)
+        return `\x1B[33m${dim(text, env)}\x1B[39m`;
+      return text;
+    case "danger":
+      if (!noColor)
+        return `\x1B[31m${dim(text, env)}\x1B[39m`;
+      return text;
+    case "normal":
+      if (!noColor && cell.baseColor)
+        return applyColor(text, cell.baseColor, env);
+      return text;
+    default:
+      return applyDimColor(text, cell.baseColor, env);
+  }
+}
+function bulletPadding(density) {
+  switch (density) {
+    case "comfortable":
+      return 2;
+    case "airy":
+      return 3;
+    default:
+      return 1;
+  }
+}
+function buildExtras(metricsCells, env, padding) {
+  if (metricsCells.length === 0)
+    return "";
+  const noColor = isColorDisabled(env);
+  const pad = " ".repeat(padding);
+  const bullet = noColor ? "•" : "\x1B[2m•\x1B[22m";
+  const sep = `${pad}${bullet}${pad}`;
+  const rendered = metricsCells.map((cell) => renderMetricsCell(cell, env));
+  return sep + rendered.join(sep);
+}
+function sessionFileUrl(sessionId) {
+  if (!sessionId)
+    return null;
+  const filePath = path2.join(os2.homedir(), ".cache/ohud/sessions", `${sessionId}.txt`);
+  return `file://${filePath}`;
+}
+function fireSessionFileWrite(layoutCtx) {
+  const sessionId = layoutCtx?.stdin?.session_id;
+  const transcript = layoutCtx?.transcript;
+  if (!sessionId || !transcript)
+    return;
+  writeSessionFile(sessionId, transcript).catch(() => {});
+}
+var hushLayout = {
+  name: "hush",
+  pack(cells, termWidth, config, layoutCtx) {
+    const hushCells = cells.filter((c) => ("text" in c) && ("attention" in c));
+    const now = Date.now();
+    const env = process.env;
+    const mode = glyphMode(config, env);
+    const noColor = isColorDisabled(env);
+    const density = config.display.hush?.density ?? "compact";
+    const padding = bulletPadding(density);
+    const pad = " ".repeat(padding);
+    const bulletGlyph = noColor ? "•" : "\x1B[2m•\x1B[22m";
+    const bulletSep = `${pad}${bulletGlyph}${pad}`;
+    const toggles = {
+      hyperlinks: config.display.hush?.hyperlinks !== false,
+      animate: config.display.hush?.animate !== false,
+      motion: config.display.hush?.motion !== "still",
+      identityColors: config.display.hush?.identityColors === true
+    };
+    const headerCells = hushCells.filter((c) => c.group === "header");
+    const metricsCells = hushCells.filter((c) => c.group === "metrics");
+    const activityCells = hushCells.filter((c) => c.group === "activity");
+    const iconCell = headerCells.find((c) => c.subId === "icon");
+    const nameCell = headerCells.find((c) => c.subId === "name");
+    const branchCell = headerCells.find((c) => c.subId === "branch");
+    const modelCell = headerCells.find((c) => c.subId === "model");
+    const contextCell = metricsCells.find((c) => c.id === "context");
+    const extrasCells = metricsCells.filter((c) => c.id !== "context");
+    const iconText = iconCell?.text ?? "";
+    const projectName = nameCell?.text ?? nameCell?.primaryText ?? "?";
+    const branchName = branchCell?.text ?? "";
+    const modelLabel = modelCell?.text ?? "";
+    const contextText = contextCell?.text ?? "";
+    const dimStr = (s) => dim(s, env);
+    const segments = [];
+    segments.push(toggles.identityColors && nameCell?.baseColor ? applyColor(projectName, nameCell.baseColor, env) : dimStr(projectName));
+    if (branchName) {
+      segments.push(dimStr(" on "));
+      segments.push(toggles.identityColors ? applyColor(branchName, "green", env) : dimStr(branchName));
+    }
+    if (modelLabel) {
+      segments.push(dimStr(" using "));
+      segments.push(toggles.identityColors ? applyColor(modelLabel, "blue", env) : dimStr(modelLabel));
+    }
+    if (contextText) {
+      segments.push(dimStr(" with context "));
+      const attention = contextCell?.attention ?? "muted";
+      if (attention === "warning" && !noColor) {
+        segments.push(`\x1B[33m${dimStr(contextText)}\x1B[39m`);
+      } else if (attention === "danger" && !noColor) {
+        segments.push(`\x1B[31m${dimStr(contextText)}\x1B[39m`);
+      } else {
+        segments.push(dimStr(contextText));
+      }
+      segments.push(dimStr(" used"));
+    }
+    const sentenceBody = segments.join("");
+    const sentenceStr = iconText ? `${iconText} ${sentenceBody}` : sentenceBody;
+    const extrasStr = buildExtras(extrasCells, env, padding);
+    const cappedActivity = capActivityCells(activityCells);
+    const totalToolCount = (() => {
+      let n = 0;
+      for (const c of cappedActivity) {
+        const moreM = /^\+(\d+) more$/.exec(c.text);
+        if (moreM) {
+          n += Number.parseInt(moreM[1], 10);
+        } else {
+          const countM = /×(\d+)/.exec(c.secondaryText ?? c.text ?? "");
+          n += countM ? Number.parseInt(countM[1], 10) : 1;
+        }
+      }
+      return n;
+    })();
+    const fileUrl = sessionFileUrl(layoutCtx?.stdin?.session_id);
+    let counterText = "";
+    if (cappedActivity.length > 0 && totalToolCount > 0) {
+      if (fileUrl && layoutCtx?.transcript) {
+        fireSessionFileWrite(layoutCtx);
+      }
+      const counterLabel = `⌗${totalToolCount}`;
+      const dimmed = dimStr(counterLabel);
+      counterText = link(dimmed, fileUrl ?? undefined, toggles.hyperlinks);
+    }
+    const hasActivity = cappedActivity.length > 0;
+    const indent = "  ";
+    const lines = [];
+    const hasSentenceContent = iconText !== "" || nameCell != null || branchName !== "" || modelLabel !== "" || contextText !== "";
+    const fullLine = sentenceStr + extrasStr;
+    if (hasSentenceContent || extrasStr) {
+      if (!extrasStr || visibleWidth(fullLine) <= termWidth) {
+        lines.push(fullLine);
+      } else {
+        lines.push(sentenceStr);
+        const extrasBody = extrasStr.trimStart();
+        lines.push(indent + extrasBody);
+      }
+    }
+    if (hasActivity) {
+      const actIndent = lines.length > 0 ? indent : "";
+      const actLine = packActivityLine(cappedActivity, counterText, now, mode, env, toggles, termWidth, actIndent, bulletSep);
+      lines.push(actLine);
+    } else {
+      const compactWhenIdle = config.display.hush?.compactWhenIdle !== false;
+      if (!compactWhenIdle && lines.length === 1) {
+        lines.push("");
+      }
+    }
+    return lines;
+  }
+};
+
 // src/doctor.ts
 var FLAG_LAYOUT = {
   showModel: "both",
@@ -790,7 +1167,18 @@ async function runDoctor(opts) {
   lines.push(`Active layout: ${activeLayout}`);
   lines.push(`Daemon probe: ${probe.daemonOk ? "ok" : "fail"}`);
   lines.push(`Mode resolution rule: model.id starts with "claude-" → anthropic; ` + `otherwise → ollama; missing → daemon-probe fallback (currently ` + `${probe.daemonOk ? "ollama" : "anthropic"}).`);
-  const lastModePath = join3(homedir2(), ".claude/plugins/ohud/last-mode.json");
+  const lastModeRaw = (() => {
+    const p = join5(homedir4(), ".claude/plugins/ohud/last-mode.json");
+    if (!existsSync2(p))
+      return probe.daemonOk ? "ollama" : "anthropic";
+    try {
+      const parsed = JSON.parse(readFileSync2(p, "utf8"));
+      return parsed.mode ?? (probe.daemonOk ? "ollama" : "anthropic");
+    } catch {
+      return probe.daemonOk ? "ollama" : "anthropic";
+    }
+  })();
+  const lastModePath = join5(homedir4(), ".claude/plugins/ohud/last-mode.json");
   if (existsSync2(lastModePath)) {
     try {
       const raw = readFileSync2(lastModePath, "utf8");
@@ -804,6 +1192,43 @@ async function runDoctor(opts) {
     const h = cfg.display.hush ?? {};
     lines.push(`Hush config: compactWhenIdle=${h.compactWhenIdle ?? true}, ` + `hyperlinks=${h.hyperlinks ?? true}, animate=${h.animate ?? true}, ` + `motion=${h.motion ?? "subtle"}, density=${h.density ?? "compact"}`);
     lines.push(`Activity TTL: running tools dropped after 300s without tool_result; ` + `completed tools fade 30s after endTime.`);
+    lines.push("");
+    for (const [renderMode, modelId] of [
+      ["anthropic", "claude-opus-4-7-1m"],
+      ["ollama", "kimi-k2-6-262k"]
+    ]) {
+      const widths = renderMode === "anthropic" ? [160, 80, 40] : [160];
+      for (const w of widths) {
+        lines.push(`Prose preview (${renderMode}, ${w} cols):`);
+        const previewLines = buildProsePreview(cfg, renderMode, modelId, w);
+        for (const l of previewLines)
+          lines.push(`  ${l}`);
+      }
+    }
+    lines.push("");
+    lines.push("Thresholds:");
+    const warning = cfg.display.hush?.thresholds?.warning ?? 60;
+    const danger = cfg.display.hush?.thresholds?.danger ?? 75;
+    for (const [pct, label] of [
+      [30, "neutral"],
+      [warning + 5 > 100 ? warning : warning + 5, "warning"],
+      [danger + 5 > 100 ? danger : danger + 5, "danger"]
+    ]) {
+      const contextCell = {
+        id: "context",
+        group: "metrics",
+        text: `${pct}% used`,
+        attention: label
+      };
+      const rendered = renderContextSwatch(contextCell, process.env);
+      lines.push(`  context ${rendered}    (${label})`);
+    }
+    lines.push("");
+    lines.push("Icon swatch:");
+    lines.push(`  unicode → ${iconForMode("anthropic", "unicode")} (anthropic)   ${iconForMode("ollama", "unicode")} (ollama)`);
+    lines.push(`  ascii   → ${iconForMode("anthropic", "ascii")} (anthropic)   ${iconForMode("ollama", "ascii")} (ollama)`);
+    lines.push(`  nerd    → ${iconForMode("anthropic", "nerd")} (anthropic)   ${iconForMode("ollama", "nerd")} (ollama)`);
+    lines.push(`  auto    → ${iconForMode(lastModeRaw, "auto")} (resolved from last mode: ${lastModeRaw})`);
   }
   lines.push("");
   lines.push("Glyph test (each row should render as 5 distinct cells):");
@@ -819,17 +1244,6 @@ async function runDoctor(opts) {
   lines.push(`  unicode → ${iconForMode("anthropic", "unicode")} (anthropic)   ${iconForMode("ollama", "unicode")} (ollama)`);
   lines.push(`  ascii   → ${iconForMode("anthropic", "ascii")} (anthropic)   ${iconForMode("ollama", "ascii")} (ollama)`);
   lines.push(`  nerd    → ${iconForMode("anthropic", "nerd")} (anthropic)   ${iconForMode("ollama", "nerd")} (ollama)`);
-  const lastModeRaw = (() => {
-    const p = join3(homedir2(), ".claude/plugins/ohud/last-mode.json");
-    if (!existsSync2(p))
-      return probe.daemonOk ? "ollama" : "anthropic";
-    try {
-      const parsed = JSON.parse(readFileSync2(p, "utf8"));
-      return parsed.mode ?? (probe.daemonOk ? "ollama" : "anthropic");
-    } catch {
-      return probe.daemonOk ? "ollama" : "anthropic";
-    }
-  })();
   lines.push(`  auto    → ${iconForMode(lastModeRaw, "auto")} (resolved from last mode: ${lastModeRaw})`);
   lines.push("");
   lines.push("Model labels:");
@@ -856,7 +1270,7 @@ lint warnings:`);
     for (const w of warnings)
       lines.push(`  ${w}`);
   }
-  const errLog = join3(homedir2(), ".claude/plugins/ohud/last-errors.log");
+  const errLog = join5(homedir4(), ".claude/plugins/ohud/last-errors.log");
   if (existsSync2(errLog)) {
     lines.push(`
 last errors (${errLog}):`);
@@ -904,17 +1318,57 @@ function buildFlagAnnotations(cfg, activeLayout) {
     const tag = GIT_CONSUMED.has(k) ? "consumed in both" : "unknown flag";
     out.push(`  gitStatus.${k}: ${JSON.stringify(v)} (${tag})`);
   }
+  if (cfg.lineLayout === "expanded") {
+    warnings.push(`LINT: lineLayout="expanded" is the legacy card layout. ` + `Recommend lineLayout="compact" for the new prose statusline.`);
+  }
+  if (cfg.display.hush?.identityColors === true) {
+    warnings.push(`LINT: display.hush.identityColors=true was a card-layout knob; ` + `under the prose layout it has no effect. Remove or set to false.`);
+  }
   return { annotations: out.join(`
 `), warnings };
+}
+function buildProsePreview(cfg, renderMode, modelId, termWidth) {
+  const previewCfg = structuredClone(cfg);
+  previewCfg.display.glyphs = "unicode";
+  if (!previewCfg.display.hush)
+    previewCfg.display.hush = {};
+  previewCfg.display.hush.hyperlinks = false;
+  const icon = iconForMode(renderMode, "unicode");
+  const modelLabel = formatModelLabel(modelId);
+  const cells = [
+    { subId: "icon", group: "header", text: icon, attention: "normal" },
+    { subId: "name", group: "header", text: "ohud", attention: "muted" },
+    { subId: "branch", group: "header", text: "develop", attention: "muted" },
+    { subId: "model", group: "header", text: modelLabel, attention: "muted" },
+    { id: "context", group: "metrics", text: "24% used", attention: "muted" },
+    { group: "metrics", text: "cache 87% hit", attention: "muted", baseColor: "cyan" },
+    { group: "metrics", text: "102 tks/s", attention: "muted" },
+    { group: "metrics", text: "session time 1:23:45", attention: "muted" },
+    { group: "metrics", text: "rate 45%/5h", attention: "muted", baseColor: "cyan" }
+  ];
+  return hushLayout.pack(cells, termWidth, previewCfg);
+}
+function renderContextSwatch(cell, env) {
+  const noColor = !!(env.NO_COLOR || env.TERM === "dumb");
+  const text = cell.text;
+  const dimWrap = (s) => noColor ? s : `\x1B[2m${s}\x1B[22m`;
+  switch (cell.attention) {
+    case "warning":
+      return noColor ? text : `\x1B[33m${dimWrap(text)}\x1B[39m`;
+    case "danger":
+      return noColor ? text : `\x1B[31m${dimWrap(text)}\x1B[39m`;
+    default:
+      return dimWrap(text);
+  }
 }
 function resolveBundlePath() {
   const root = process.env.CLAUDE_PLUGIN_ROOT;
   if (root)
-    return join3(root, "dist", "index.js");
+    return join5(root, "dist", "index.js");
   try {
     return fileURLToPath(import.meta.url);
   } catch {
-    return join3(homedir2(), ".claude/plugins/cache/ohud/ohud/0.1.0/dist/index.js");
+    return join5(homedir4(), ".claude/plugins/cache/ohud/ohud/0.1.0/dist/index.js");
   }
 }
 function readPackageJson() {
@@ -928,10 +1382,10 @@ function readPackageJson() {
 }
 function writeLastModeState(mode, modelId) {
   try {
-    const dir = join3(homedir2(), ".claude/plugins/ohud");
+    const dir = join5(homedir4(), ".claude/plugins/ohud");
     mkdirSync2(dir, { recursive: true });
-    const path = join3(dir, "last-mode.json");
-    writeFileSync2(path, JSON.stringify({ mode, modelId, updatedAt: new Date().toISOString() }));
+    const path3 = join5(dir, "last-mode.json");
+    writeFileSync2(path3, JSON.stringify({ mode, modelId, updatedAt: new Date().toISOString() }));
   } catch {}
 }
 
@@ -946,7 +1400,7 @@ function resolveMode(stdin, probe) {
 }
 
 // src/transcript.ts
-import { readFile as readFile2, stat } from "node:fs/promises";
+import { readFile as readFile2, stat as stat2 } from "node:fs/promises";
 var ERROR_CONTENT_RE = /^Error[: ]|exit code [1-9]|ENOENT|EACCES|EPERM|EISDIR|ENOTDIR/i;
 function isErrorContent(content) {
   if (typeof content === "string")
@@ -962,27 +1416,27 @@ function isErrorContent(content) {
   return false;
 }
 var cache = new Map;
-async function parseTranscript(path) {
-  if (!path)
+async function parseTranscript(path3) {
+  if (!path3)
     return empty();
   let st;
   try {
-    st = await stat(path);
+    st = await stat2(path3);
   } catch {
     return empty();
   }
-  const cached = cache.get(path);
+  const cached = cache.get(path3);
   if (cached && cached.size === st.size && cached.mtimeMs === st.mtimeMs) {
     return cached.data;
   }
   let raw;
   try {
-    raw = await readFile2(path, "utf8");
+    raw = await readFile2(path3, "utf8");
   } catch {
     return empty();
   }
   const data = parseRaw(raw);
-  cache.set(path, { size: st.size, mtimeMs: st.mtimeMs, data });
+  cache.set(path3, { size: st.size, mtimeMs: st.mtimeMs, data });
   return data;
 }
 function empty() {
@@ -1203,12 +1657,12 @@ function fromStdin(stdin) {
     sevenDayResetAt: epochToDate(rl.seven_day?.resets_at)
   };
 }
-async function fromExternalSnapshot(path, freshnessMs, now = Date.now) {
-  if (!path)
+async function fromExternalSnapshot(path3, freshnessMs, now = Date.now) {
+  if (!path3)
     return null;
   let raw;
   try {
-    raw = await readFile3(path, "utf8");
+    raw = await readFile3(path3, "utf8");
   } catch {
     return null;
   }
@@ -2075,8 +2529,8 @@ function renderTodos(ctx) {
 
 // src/render/widgets/environment.ts
 import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
-import { dirname, join as join4 } from "node:path";
-import { homedir as homedir3 } from "node:os";
+import { dirname, join as join6 } from "node:path";
+import { homedir as homedir5 } from "node:os";
 var environmentWidget = {
   id: "environment",
   group: "activity",
@@ -2109,26 +2563,26 @@ function renderEnvironment(ctx) {
   return color(c.label, parts.join(" | "));
 }
 function countAll(startDir) {
-  const home = homedir3();
+  const home = homedir5();
   let claudeMd = 0;
   let dir = startDir;
   while (dir && dir.length > 1 && dir.startsWith(home)) {
-    if (existsSync3(join4(dir, "CLAUDE.md")))
+    if (existsSync3(join6(dir, "CLAUDE.md")))
       claudeMd += 1;
     const parent = dirname(dir);
     if (parent === dir)
       break;
     dir = parent;
   }
-  const settings = readSettings(join4(home, ".claude/settings.json"));
+  const settings = readSettings(join6(home, ".claude/settings.json"));
   const mcps = Object.keys(settings?.mcpServers ?? {}).length;
   const hooks = countHooks(settings?.hooks);
   const rules = readRules(startDir);
   return { claudeMd, rules, mcps, hooks };
 }
-function readSettings(path) {
+function readSettings(path3) {
   try {
-    return JSON.parse(readFileSync3(path, "utf8"));
+    return JSON.parse(readFileSync3(path3, "utf8"));
   } catch {
     return null;
   }
@@ -2144,11 +2598,11 @@ function countHooks(hooks) {
   return n;
 }
 function readRules(startDir) {
-  const path = join4(startDir, ".claude/rules.md");
-  if (!existsSync3(path))
+  const path3 = join6(startDir, ".claude/rules.md");
+  if (!existsSync3(path3))
     return 0;
   try {
-    const content = readFileSync3(path, "utf8");
+    const content = readFileSync3(path3, "utf8");
     return content.split(`
 `).filter((l) => /^[-*]\s+\S/.test(l)).length;
   } catch {
@@ -2256,383 +2710,6 @@ var rowLayout = {
       rendered.add(key);
     }
     return lines.map((l) => truncateLine(l, termWidth));
-  }
-};
-
-// src/render/layout/hush.ts
-import * as os2 from "node:os";
-import * as path2 from "node:path";
-
-// src/render/dim.ts
-function dim(text, env) {
-  if (isColorDisabled(env))
-    return text;
-  return `\x1B[2m${text}\x1B[22m`;
-}
-
-// src/render/hyperlink.ts
-function link(text, url, enabled = true) {
-  if (!enabled || !url)
-    return text;
-  if (url.includes("\x07"))
-    return text;
-  return `\x1B]8;;${url}\x07${text}\x1B]8;;\x07`;
-}
-
-// src/session-state.ts
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
-var DEFAULT_CACHE_DIR = path.join(os.homedir(), ".cache/ohud/sessions");
-var WRITE_DEBOUNCE_MS = 1000;
-async function writeSessionFile(sessionId, transcript, options) {
-  const cacheDir = options?.cacheDir ?? DEFAULT_CACHE_DIR;
-  const now = options?.now ?? Date.now();
-  const filePath = path.join(cacheDir, `${sessionId}.txt`);
-  try {
-    const st = await fs.stat(filePath);
-    if (Math.abs(now - st.mtimeMs) < WRITE_DEBOUNCE_MS) {
-      return filePath;
-    }
-  } catch {}
-  await fs.mkdir(cacheDir, { recursive: true });
-  const content = formatSessionFile(sessionId, transcript);
-  await fs.writeFile(filePath, content, "utf8");
-  return filePath;
-}
-function formatSessionFile(sessionId, transcript) {
-  const lines = [];
-  lines.push(`ohud session ${sessionId}`);
-  if (transcript.sessionStart) {
-    const d = transcript.sessionStart;
-    const pad = (n) => String(n).padStart(2, "0");
-    const datePart = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    const timePart = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    lines.push(`started ${datePart} ${timePart}`);
-  } else {
-    lines.push("started unknown");
-  }
-  lines.push("");
-  const toolCounts = new Map;
-  for (const tool of transcript.tools) {
-    toolCounts.set(tool.name, (toolCounts.get(tool.name) ?? 0) + 1);
-  }
-  const sortedTools = [...toolCounts.entries()].sort((a, b) => b[1] - a[1]);
-  lines.push(`Tools (total: ${transcript.tools.length}):`);
-  for (const [name, count] of sortedTools) {
-    const paddedName = name.padStart(8, " ");
-    lines.push(`  ${paddedName}    ${count}`);
-  }
-  lines.push("");
-  const errorTools = transcript.tools.filter((t) => t.hasError === true);
-  lines.push(`Errors: ${errorTools.length}`);
-  if (errorTools.length > 0) {
-    for (const tool of errorTools) {
-      const ts = tool.endTime ?? tool.startTime;
-      const pad = (n) => String(n).padStart(2, "0");
-      const timeStr = `${pad(ts.getHours())}:${pad(ts.getMinutes())}:${pad(ts.getSeconds())}`;
-      lines.push(`  - ${tool.name} error at ${timeStr}`);
-    }
-  }
-  return lines.join(`
-`) + `
-`;
-}
-
-// src/render/layout/hush.ts
-var SGR_FG = {
-  cyan: "36",
-  green: "32",
-  blue: "34",
-  magenta: "35",
-  yellow: "33",
-  red: "31"
-};
-var RESET_FG = "\x1B[39m";
-var MAX_RUNNING = 3;
-var MAX_DONE = 4;
-function applyColor(text, colorName, env) {
-  if (isColorDisabled(env))
-    return text;
-  const code = SGR_FG[colorName];
-  if (!code)
-    return text;
-  return `\x1B[${code}m${text}${RESET_FG}`;
-}
-function applyDimColor(text, colorName, env) {
-  if (isColorDisabled(env))
-    return text;
-  if (!colorName)
-    return dim(text, env);
-  const code = SGR_FG[colorName];
-  if (!code)
-    return dim(text, env);
-  return `\x1B[2;${code}m${text}\x1B[22;39m`;
-}
-function glyphMode(config, env) {
-  const g = config.display.glyphs;
-  if (g === "unicode")
-    return "unicode";
-  if (g === "ascii")
-    return "ascii";
-  const e = env ?? process.env;
-  const lang = e.LANG ?? "";
-  if (lang.includes("UTF-8") || lang.toLowerCase().includes("utf8"))
-    return "unicode";
-  if (e.LC_ALL?.includes("UTF-8"))
-    return "unicode";
-  return "ascii";
-}
-function renderActivityCell(cell, now, mode, env, toggles) {
-  const noColor = isColorDisabled(env);
-  if (cell.primaryText !== undefined && cell.secondaryText !== undefined) {
-    let primaryStyled = cell.primaryText;
-    if (!noColor && cell.baseColor) {
-      primaryStyled = applyColor(cell.primaryText, cell.baseColor, env);
-    }
-    const secondaryStyled = dim(cell.secondaryText, env);
-    let text2 = `${primaryStyled} ${secondaryStyled}`;
-    if (cell.animate === "spinner" && toggles.animate) {
-      const g = spinnerFrame(toggles.motion ? now : 0, mode);
-      text2 = `${g} ${text2}`;
-    }
-    if (cell.link) {
-      text2 = link(text2, cell.link, toggles.hyperlinks);
-    }
-    return text2;
-  }
-  let text = cell.text;
-  if (cell.animate === "spinner" && toggles.animate) {
-    const g = spinnerFrame(toggles.motion ? now : 0, mode);
-    text = `${g} ${text}`;
-  }
-  switch (cell.attention) {
-    case "muted":
-      text = applyDimColor(text, cell.baseColor, env);
-      break;
-    case "normal":
-      if (!noColor && cell.baseColor)
-        text = applyColor(text, cell.baseColor, env);
-      break;
-    case "warning":
-      if (!noColor)
-        text = `\x1B[33m${text}${RESET_FG}`;
-      break;
-    case "danger":
-      if (!noColor)
-        text = `\x1B[31m${text}${RESET_FG}`;
-      break;
-  }
-  if (cell.link) {
-    text = link(text, cell.link, toggles.hyperlinks);
-  }
-  return text;
-}
-function capActivityCells(cells) {
-  const running = cells.filter((c) => c.animate === "spinner");
-  const done = cells.filter((c) => c.animate !== "spinner");
-  const cappedRunning = running.slice(0, MAX_RUNNING);
-  const cappedDone = done.slice(0, MAX_DONE);
-  const dropped = running.length - cappedRunning.length + (done.length - cappedDone.length);
-  const result = [...cappedRunning, ...cappedDone];
-  if (dropped > 0) {
-    result.push({
-      text: `+${dropped} more`,
-      attention: "muted",
-      group: "activity"
-    });
-  }
-  return result;
-}
-function packActivityLine(cells, counterText, now, mode, env, toggles, termWidth, indent, bulletSep) {
-  const last = cells[cells.length - 1];
-  const moreMatch = last ? /^\+(\d+) more$/.exec(last.text) : null;
-  const initialMore = moreMatch ? Number.parseInt(moreMatch[1], 10) : 0;
-  const main = moreMatch ? cells.slice(0, -1) : [...cells];
-  const buildActivityStr = (cs, droppedExtra2) => {
-    const rendered = cs.map((c) => renderActivityCell(c, now, mode, env, toggles));
-    const total = initialMore + droppedExtra2;
-    if (total > 0)
-      rendered.push(dim(`+${total} more`, env));
-    let line = rendered.join(bulletSep);
-    if (counterText) {
-      line = line ? `${line}  ${counterText}` : counterText;
-    }
-    return indent + line;
-  };
-  let droppedExtra = 0;
-  let result = buildActivityStr(main, droppedExtra);
-  while (visibleWidth(result) > termWidth && main.length > 0) {
-    main.pop();
-    droppedExtra += 1;
-    result = buildActivityStr(main, droppedExtra);
-  }
-  if (visibleWidth(result) > termWidth) {
-    result = truncateLine(result, termWidth);
-  }
-  return result;
-}
-function renderMetricsCell(cell, env) {
-  const noColor = isColorDisabled(env);
-  const text = cell.text;
-  switch (cell.attention) {
-    case "warning":
-      if (!noColor)
-        return `\x1B[33m${dim(text, env)}\x1B[39m`;
-      return text;
-    case "danger":
-      if (!noColor)
-        return `\x1B[31m${dim(text, env)}\x1B[39m`;
-      return text;
-    case "normal":
-      if (!noColor && cell.baseColor)
-        return applyColor(text, cell.baseColor, env);
-      return text;
-    default:
-      return applyDimColor(text, cell.baseColor, env);
-  }
-}
-function bulletPadding(density) {
-  switch (density) {
-    case "comfortable":
-      return 2;
-    case "airy":
-      return 3;
-    default:
-      return 1;
-  }
-}
-function buildExtras(metricsCells, env, padding) {
-  if (metricsCells.length === 0)
-    return "";
-  const noColor = isColorDisabled(env);
-  const pad = " ".repeat(padding);
-  const bullet = noColor ? "•" : "\x1B[2m•\x1B[22m";
-  const sep = `${pad}${bullet}${pad}`;
-  const rendered = metricsCells.map((cell) => renderMetricsCell(cell, env));
-  return sep + rendered.join(sep);
-}
-function sessionFileUrl(sessionId) {
-  if (!sessionId)
-    return null;
-  const filePath = path2.join(os2.homedir(), ".cache/ohud/sessions", `${sessionId}.txt`);
-  return `file://${filePath}`;
-}
-function fireSessionFileWrite(layoutCtx) {
-  const sessionId = layoutCtx?.stdin?.session_id;
-  const transcript = layoutCtx?.transcript;
-  if (!sessionId || !transcript)
-    return;
-  writeSessionFile(sessionId, transcript).catch(() => {});
-}
-var hushLayout = {
-  name: "hush",
-  pack(cells, termWidth, config, layoutCtx) {
-    const hushCells = cells.filter((c) => ("text" in c) && ("attention" in c));
-    const now = Date.now();
-    const env = process.env;
-    const mode = glyphMode(config, env);
-    const noColor = isColorDisabled(env);
-    const density = config.display.hush?.density ?? "compact";
-    const padding = bulletPadding(density);
-    const pad = " ".repeat(padding);
-    const bulletGlyph = noColor ? "•" : "\x1B[2m•\x1B[22m";
-    const bulletSep = `${pad}${bulletGlyph}${pad}`;
-    const toggles = {
-      hyperlinks: config.display.hush?.hyperlinks !== false,
-      animate: config.display.hush?.animate !== false,
-      motion: config.display.hush?.motion !== "still",
-      identityColors: config.display.hush?.identityColors === true
-    };
-    const headerCells = hushCells.filter((c) => c.group === "header");
-    const metricsCells = hushCells.filter((c) => c.group === "metrics");
-    const activityCells = hushCells.filter((c) => c.group === "activity");
-    const iconCell = headerCells.find((c) => c.subId === "icon");
-    const nameCell = headerCells.find((c) => c.subId === "name");
-    const branchCell = headerCells.find((c) => c.subId === "branch");
-    const modelCell = headerCells.find((c) => c.subId === "model");
-    const contextCell = metricsCells.find((c) => c.id === "context");
-    const extrasCells = metricsCells.filter((c) => c.id !== "context");
-    const iconText = iconCell?.text ?? "";
-    const projectName = nameCell?.text ?? nameCell?.primaryText ?? "?";
-    const branchName = branchCell?.text ?? "";
-    const modelLabel = modelCell?.text ?? "";
-    const contextText = contextCell?.text ?? "";
-    const dimStr = (s) => dim(s, env);
-    const segments = [];
-    segments.push(toggles.identityColors && nameCell?.baseColor ? applyColor(projectName, nameCell.baseColor, env) : dimStr(projectName));
-    if (branchName) {
-      segments.push(dimStr(" on "));
-      segments.push(toggles.identityColors ? applyColor(branchName, "green", env) : dimStr(branchName));
-    }
-    if (modelLabel) {
-      segments.push(dimStr(" using "));
-      segments.push(toggles.identityColors ? applyColor(modelLabel, "blue", env) : dimStr(modelLabel));
-    }
-    if (contextText) {
-      segments.push(dimStr(" with context "));
-      const attention = contextCell?.attention ?? "muted";
-      if (attention === "warning" && !noColor) {
-        segments.push(`\x1B[33m${dimStr(contextText)}\x1B[39m`);
-      } else if (attention === "danger" && !noColor) {
-        segments.push(`\x1B[31m${dimStr(contextText)}\x1B[39m`);
-      } else {
-        segments.push(dimStr(contextText));
-      }
-      segments.push(dimStr(" used"));
-    }
-    const sentenceBody = segments.join("");
-    const sentenceStr = iconText ? `${iconText} ${sentenceBody}` : sentenceBody;
-    const extrasStr = buildExtras(extrasCells, env, padding);
-    const cappedActivity = capActivityCells(activityCells);
-    const totalToolCount = (() => {
-      let n = 0;
-      for (const c of cappedActivity) {
-        const moreM = /^\+(\d+) more$/.exec(c.text);
-        if (moreM) {
-          n += Number.parseInt(moreM[1], 10);
-        } else {
-          const countM = /×(\d+)/.exec(c.secondaryText ?? c.text ?? "");
-          n += countM ? Number.parseInt(countM[1], 10) : 1;
-        }
-      }
-      return n;
-    })();
-    const fileUrl = sessionFileUrl(layoutCtx?.stdin?.session_id);
-    let counterText = "";
-    if (cappedActivity.length > 0 && totalToolCount > 0) {
-      if (fileUrl && layoutCtx?.transcript) {
-        fireSessionFileWrite(layoutCtx);
-      }
-      const counterLabel = `⌗${totalToolCount}`;
-      const dimmed = dimStr(counterLabel);
-      counterText = link(dimmed, fileUrl ?? undefined, toggles.hyperlinks);
-    }
-    const hasActivity = cappedActivity.length > 0;
-    const indent = "  ";
-    const lines = [];
-    const hasSentenceContent = iconText !== "" || nameCell != null || branchName !== "" || modelLabel !== "" || contextText !== "";
-    const fullLine = sentenceStr + extrasStr;
-    if (hasSentenceContent || extrasStr) {
-      if (!extrasStr || visibleWidth(fullLine) <= termWidth) {
-        lines.push(fullLine);
-      } else {
-        lines.push(sentenceStr);
-        const extrasBody = extrasStr.trimStart();
-        lines.push(indent + extrasBody);
-      }
-    }
-    if (hasActivity) {
-      const actIndent = lines.length > 0 ? indent : "";
-      const actLine = packActivityLine(cappedActivity, counterText, now, mode, env, toggles, termWidth, actIndent, bulletSep);
-      lines.push(actLine);
-    } else {
-      const compactWhenIdle = config.display.hush?.compactWhenIdle !== false;
-      if (!compactWhenIdle && lines.length === 1) {
-        lines.push("");
-      }
-    }
-    return lines;
   }
 };
 

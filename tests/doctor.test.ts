@@ -125,3 +125,166 @@ test("doctor classifies showModel as 'consumed in both' (used by both layouts)",
   const match = out.match(/display\.showModel: [^\(]+\(([^)]+)\)/);
   expect(match?.[1]).toBe("consumed in both");
 });
+
+// ── T5: Prose preview, threshold swatch, icon swatch, legacy-knob lints ──────
+
+// Doctor is called with layout=hush to trigger the prose preview section.
+async function hushDoctorOut(extraCfg?: Record<string, unknown>): Promise<string> {
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "ohud-doc-t5-"));
+  try {
+    const cfgPath = join(dir, "config.json");
+    writeFileSync(cfgPath, JSON.stringify({
+      display: { layout: "hush", ...(extraCfg ?? {}) },
+    }));
+    return await runDoctor({ host: "http://localhost:11434", configPath: cfgPath });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── Prose preview ────────────────────────────────────────────────────────────
+
+test("doctor shows prose preview header for 160 cols when layout=hush", async () => {
+  const out = await hushDoctorOut();
+  expect(out).toContain("Prose preview (anthropic, 160 cols)");
+});
+
+test("doctor shows prose preview header for 80 cols when layout=hush", async () => {
+  const out = await hushDoctorOut();
+  expect(out).toContain("Prose preview (anthropic, 80 cols)");
+});
+
+test("doctor shows prose preview header for 40 cols when layout=hush", async () => {
+  const out = await hushDoctorOut();
+  expect(out).toContain("Prose preview (anthropic, 40 cols)");
+});
+
+test("doctor shows ollama prose preview at 160 cols when layout=hush", async () => {
+  const out = await hushDoctorOut();
+  expect(out).toContain("Prose preview (ollama, 160 cols)");
+});
+
+test("prose preview lines contain 'ohud' as project name", async () => {
+  const out = await hushDoctorOut();
+  // Strip ANSI and check the 160-col anthropic preview line contains "ohud"
+  const plain = out.replace(/\x1b\[[0-9;]*m/g, "");
+  expect(plain).toContain("ohud");
+});
+
+test("prose preview lines contain 'develop' as branch", async () => {
+  const out = await hushDoctorOut();
+  const plain = out.replace(/\x1b\[[0-9;]*m/g, "");
+  expect(plain).toContain("develop");
+});
+
+test("prose preview contains context percentage", async () => {
+  const out = await hushDoctorOut();
+  const plain = out.replace(/\x1b\[[0-9;]*m/g, "");
+  expect(plain).toMatch(/24%/);
+});
+
+// ── Threshold swatch ─────────────────────────────────────────────────────────
+
+test("doctor shows Thresholds swatch section when layout=hush", async () => {
+  const out = await hushDoctorOut();
+  expect(out).toContain("Thresholds:");
+});
+
+test("threshold swatch shows neutral context at 30%", async () => {
+  const out = await hushDoctorOut();
+  const plain = out.replace(/\x1b\[[0-9;]*m/g, "");
+  expect(plain).toMatch(/context 30% used/);
+});
+
+test("threshold swatch shows warning context at 65%", async () => {
+  const out = await hushDoctorOut();
+  const plain = out.replace(/\x1b\[[0-9;]*m/g, "");
+  expect(plain).toMatch(/context 65% used/);
+});
+
+test("threshold swatch shows danger context at 80%", async () => {
+  const out = await hushDoctorOut();
+  const plain = out.replace(/\x1b\[[0-9;]*m/g, "");
+  expect(plain).toMatch(/context 80% used/);
+});
+
+test("threshold swatch labels neutral/warning/danger", async () => {
+  const out = await hushDoctorOut();
+  expect(out).toContain("(neutral)");
+  expect(out).toContain("(warning)");
+  expect(out).toContain("(danger)");
+});
+
+// ── Icon swatch ──────────────────────────────────────────────────────────────
+
+test("doctor shows Icon swatch section when layout=hush", async () => {
+  const out = await hushDoctorOut();
+  expect(out).toContain("Icon swatch:");
+});
+
+test("icon swatch shows all three glyph tiers", async () => {
+  const out = await hushDoctorOut();
+  expect(out).toContain("unicode");
+  expect(out).toContain("ascii");
+  expect(out).toContain("nerd");
+});
+
+test("icon swatch shows auto resolution", async () => {
+  const out = await hushDoctorOut();
+  expect(out).toContain("auto");
+});
+
+// ── Legacy-knob lints ────────────────────────────────────────────────────────
+
+test("doctor lints lineLayout='expanded' with prose-layout recommendation", async () => {
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "ohud-doc-t5-lint-"));
+  try {
+    const cfgPath = join(dir, "config.json");
+    // lineLayout is a top-level field; combine with hush layout
+    writeFileSync(cfgPath, JSON.stringify({
+      lineLayout: "expanded",
+      display: { layout: "hush" },
+    }));
+    const out = await runDoctor({ host: "http://localhost:11434", configPath: cfgPath });
+    expect(out).toContain('LINT: lineLayout="expanded"');
+    expect(out).toContain("legacy card layout");
+    expect(out).toContain('lineLayout="compact"');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor lints identityColors=true with prose-layout no-effect notice", async () => {
+  const out = await hushDoctorOut({ hush: { identityColors: true } });
+  expect(out).toContain("LINT: display.hush.identityColors=true");
+  expect(out).toContain("no effect");
+});
+
+test("doctor does NOT emit lineLayout lint when lineLayout='compact'", async () => {
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "ohud-doc-t5-lint-ok-"));
+  try {
+    const cfgPath = join(dir, "config.json");
+    writeFileSync(cfgPath, JSON.stringify({
+      lineLayout: "compact",
+      display: { layout: "hush" },
+    }));
+    const out = await runDoctor({ host: "http://localhost:11434", configPath: cfgPath });
+    expect(out).not.toContain('LINT: lineLayout="expanded"');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor does NOT emit identityColors lint when identityColors=false", async () => {
+  const out = await hushDoctorOut({ hush: { identityColors: false } });
+  expect(out).not.toContain("LINT: display.hush.identityColors=true");
+});

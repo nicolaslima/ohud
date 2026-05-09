@@ -279,6 +279,12 @@ export interface HudConfig {
       density?: "compact" | "comfortable" | "airy";
       /** Show cyan/green/blue identity colors for project/branch/model. Default false (muted). */
       identityColors?: boolean;
+      /**
+       * Brand icon override. "auto" derives from session mode (anthropic → ✱, ollama → 🦙);
+       * "anthropic" / "ollama" forces that brand icon regardless of mode; "none" suppresses it.
+       * Default "auto".
+       */
+      icon?: "auto" | "anthropic" | "ollama" | "none";
     };
   };
   gitStatus: {

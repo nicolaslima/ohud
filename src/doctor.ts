@@ -8,6 +8,8 @@ import { loadConfig } from "./config.js";
 import { glyph, iconForMode } from "./render/glyphs.js";
 import { spinnerFrame } from "./render/spinner.js";
 import { formatModelLabel } from "./render/widgets/project.js";
+import { hushLayout } from "./render/layout/hush.js";
+import type { HushCell } from "./render/widget.js";
 import type { HudConfig } from "./types.js";
 
 // Layout affinity for each display.* flag:
@@ -100,6 +102,16 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
     `${probe.daemonOk ? "ollama" : "anthropic"}).`,
   );
 
+  // Resolve last rendered mode early — used by both the Hush block and Icons section.
+  const lastModeRaw = (() => {
+    const p = join(homedir(), ".claude/plugins/ohud/last-mode.json");
+    if (!existsSync(p)) return probe.daemonOk ? "ollama" : "anthropic";
+    try {
+      const parsed = JSON.parse(readFileSync(p, "utf8")) as { mode?: string };
+      return parsed.mode ?? (probe.daemonOk ? "ollama" : "anthropic");
+    } catch { return probe.daemonOk ? "ollama" : "anthropic"; }
+  })() as import("./types.js").RenderMode;
+
   // Last rendered mode from per-tick state file
   const lastModePath = join(homedir(), ".claude/plugins/ohud/last-mode.json");
   if (existsSync(lastModePath)) {
@@ -126,6 +138,48 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
       `Activity TTL: running tools dropped after 300s without tool_result; ` +
       `completed tools fade 30s after endTime.`,
     );
+
+    // Prose preview at three widths (anthropic + ollama)
+    lines.push("");
+    for (const [renderMode, modelId] of [
+      ["anthropic", "claude-opus-4-7-1m"],
+      ["ollama",    "kimi-k2-6-262k"],
+    ] as const) {
+      const widths = renderMode === "anthropic" ? [160, 80, 40] : [160];
+      for (const w of widths) {
+        lines.push(`Prose preview (${renderMode}, ${w} cols):`);
+        const previewLines = buildProsePreview(cfg, renderMode, modelId, w);
+        for (const l of previewLines) lines.push(`  ${l}`);
+      }
+    }
+
+    // Threshold swatch
+    lines.push("");
+    lines.push("Thresholds:");
+    const warning = cfg.display.hush?.thresholds?.warning ?? 60;
+    const danger  = cfg.display.hush?.thresholds?.danger  ?? 75;
+    for (const [pct, label] of [
+      [30, "neutral"],
+      [warning + 5 > 100 ? warning : warning + 5, "warning"],
+      [danger  + 5 > 100 ? danger  : danger  + 5, "danger" ],
+    ] as [number, string][]) {
+      const contextCell: HushCell = {
+        id: "context",
+        group: "metrics",
+        text: `${pct}% used`,
+        attention: label as "muted" | "normal" | "warning" | "danger",
+      };
+      const rendered = renderContextSwatch(contextCell, process.env);
+      lines.push(`  context ${rendered}    (${label})`);
+    }
+
+    // Icon swatch
+    lines.push("");
+    lines.push("Icon swatch:");
+    lines.push(`  unicode → ${iconForMode("anthropic", "unicode")} (anthropic)   ${iconForMode("ollama", "unicode")} (ollama)`);
+    lines.push(`  ascii   → ${iconForMode("anthropic", "ascii")} (anthropic)   ${iconForMode("ollama", "ascii")} (ollama)`);
+    lines.push(`  nerd    → ${iconForMode("anthropic", "nerd")} (anthropic)   ${iconForMode("ollama", "nerd")} (ollama)`);
+    lines.push(`  auto    → ${iconForMode(lastModeRaw, "auto")} (resolved from last mode: ${lastModeRaw})`);
   }
 
   // Glyph test row — three tiers side-by-side, plus a sample spinner cycle.
@@ -148,15 +202,6 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
   lines.push(`  unicode → ${iconForMode("anthropic", "unicode")} (anthropic)   ${iconForMode("ollama", "unicode")} (ollama)`);
   lines.push(`  ascii   → ${iconForMode("anthropic", "ascii")} (anthropic)   ${iconForMode("ollama", "ascii")} (ollama)`);
   lines.push(`  nerd    → ${iconForMode("anthropic", "nerd")} (anthropic)   ${iconForMode("ollama", "nerd")} (ollama)`);
-  // Resolve auto from last-rendered mode (best-effort; unknown falls back to daemon probe result)
-  const lastModeRaw = (() => {
-    const p = join(homedir(), ".claude/plugins/ohud/last-mode.json");
-    if (!existsSync(p)) return probe.daemonOk ? "ollama" : "anthropic";
-    try {
-      const parsed = JSON.parse(readFileSync(p, "utf8")) as { mode?: string };
-      return parsed.mode ?? (probe.daemonOk ? "ollama" : "anthropic");
-    } catch { return probe.daemonOk ? "ollama" : "anthropic"; }
-  })() as import("./types.js").RenderMode;
   lines.push(`  auto    → ${iconForMode(lastModeRaw, "auto")} (resolved from last mode: ${lastModeRaw})`);
 
   // Model label samples — demonstrates formatModelLabel across representative ids.
@@ -244,7 +289,81 @@ function buildFlagAnnotations(
     out.push(`  gitStatus.${k}: ${JSON.stringify(v)} (${tag})`);
   }
 
+  // T5: legacy-knob lints
+  if (cfg.lineLayout === "expanded") {
+    warnings.push(
+      `LINT: lineLayout="expanded" is the legacy card layout. ` +
+      `Recommend lineLayout="compact" for the new prose statusline.`,
+    );
+  }
+
+  if (cfg.display.hush?.identityColors === true) {
+    warnings.push(
+      `LINT: display.hush.identityColors=true was a card-layout knob; ` +
+      `under the prose layout it has no effect. Remove or set to false.`,
+    );
+  }
+
   return { annotations: out.join("\n"), warnings };
+}
+
+// ---------------------------------------------------------------------------
+// buildProsePreview — renders a synthetic hush statusline at a given width.
+//
+// Calls hushLayout.pack() directly with hand-crafted HushCell fixtures.
+// Fixture values: project "ohud", branch "develop", model from modelId arg,
+// context 24%, cache 87% hit, 102 tks/s, session time 1h23m45s, rate 45%/5h.
+// ---------------------------------------------------------------------------
+
+function buildProsePreview(
+  cfg: HudConfig,
+  renderMode: "anthropic" | "ollama",
+  modelId: string,
+  termWidth: number,
+): string[] {
+  // Derive glyph mode from config, forced to unicode for preview determinism.
+  const previewCfg = structuredClone(cfg);
+  previewCfg.display.glyphs = "unicode";
+  // Disable hyperlinks in preview (no real session_id available).
+  if (!previewCfg.display.hush) previewCfg.display.hush = {};
+  previewCfg.display.hush.hyperlinks = false;
+
+  const icon = iconForMode(renderMode, "unicode");
+  const modelLabel = formatModelLabel(modelId);
+
+  const cells: HushCell[] = [
+    { subId: "icon",    group: "header",  text: icon,        attention: "normal" },
+    { subId: "name",    group: "header",  text: "ohud",      attention: "muted"  },
+    { subId: "branch",  group: "header",  text: "develop",   attention: "muted"  },
+    { subId: "model",   group: "header",  text: modelLabel,  attention: "muted"  },
+    { id: "context",    group: "metrics", text: "24% used",  attention: "muted"  },
+    {                   group: "metrics", text: "cache 87% hit", attention: "muted", baseColor: "cyan" },
+    {                   group: "metrics", text: "102 tks/s",    attention: "muted" },
+    {                   group: "metrics", text: "session time 1:23:45", attention: "muted" },
+    {                   group: "metrics", text: "rate 45%/5h",  attention: "muted", baseColor: "cyan" },
+  ];
+
+  return hushLayout.pack(cells, termWidth, previewCfg);
+}
+
+// ---------------------------------------------------------------------------
+// renderContextSwatch — render a context cell using the same SGR codes that
+// hushLayout produces, so the swatch is visually accurate.
+// ---------------------------------------------------------------------------
+
+function renderContextSwatch(cell: HushCell, env: NodeJS.ProcessEnv): string {
+  const noColor = !!(env.NO_COLOR || env.TERM === "dumb");
+  const text = cell.text;
+  const dimWrap = (s: string) => noColor ? s : `\x1b[2m${s}\x1b[22m`;
+
+  switch (cell.attention) {
+    case "warning":
+      return noColor ? text : `\x1b[33m${dimWrap(text)}\x1b[39m`;
+    case "danger":
+      return noColor ? text : `\x1b[31m${dimWrap(text)}\x1b[39m`;
+    default:
+      return dimWrap(text);
+  }
 }
 
 function resolveBundlePath(): string {

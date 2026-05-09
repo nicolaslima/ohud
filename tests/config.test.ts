@@ -177,6 +177,48 @@ test("parse error log contains config file path", async () => {
   expect(logContent).toContain(cfgPath);
 });
 
+// T5: icon and thresholds defaults
+
+test("default display.hush.icon is 'auto'", async () => {
+  const c = await loadConfig(join(dir, "config.json"));
+  expect(c.display.hush?.icon).toBe("auto");
+});
+
+test("default display.hush.thresholds.warning is 60", async () => {
+  const c = await loadConfig(join(dir, "config.json"));
+  expect(c.display.hush?.thresholds?.warning).toBe(60);
+});
+
+test("default display.hush.thresholds.danger is 75", async () => {
+  const c = await loadConfig(join(dir, "config.json"));
+  expect(c.display.hush?.thresholds?.danger).toBe(75);
+});
+
+test("user override display.hush.icon='anthropic' is honored", async () => {
+  writeFileSync(join(dir, "config.json"), JSON.stringify({
+    display: { hush: { icon: "anthropic" } },
+  }));
+  const c = await loadConfig(join(dir, "config.json"));
+  expect(c.display.hush?.icon).toBe("anthropic");
+});
+
+test("user override display.hush.icon='none' is honored", async () => {
+  writeFileSync(join(dir, "config.json"), JSON.stringify({
+    display: { hush: { icon: "none" } },
+  }));
+  const c = await loadConfig(join(dir, "config.json"));
+  expect(c.display.hush?.icon).toBe("none");
+});
+
+test("user override display.hush.thresholds survives deepMerge", async () => {
+  writeFileSync(join(dir, "config.json"), JSON.stringify({
+    display: { hush: { thresholds: { warning: 50, danger: 80 } } },
+  }));
+  const c = await loadConfig(join(dir, "config.json"));
+  expect(c.display.hush?.thresholds?.warning).toBe(50);
+  expect(c.display.hush?.thresholds?.danger).toBe(80);
+});
+
 test("no parse error log entry when config is valid JSON", async () => {
   const { existsSync, rmSync } = await import("node:fs");
   const { homedir } = await import("node:os");

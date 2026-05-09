@@ -42,7 +42,7 @@ export const DEFAULT_CONFIG: HudConfig = {
     showEffortLevel: true,
     glyphs: "auto",
     layout: "row",
-    hush: { compactWhenIdle: true, hyperlinks: true, animate: true, motion: "subtle", density: "compact", identityColors: false },
+    hush: { compactWhenIdle: true, hyperlinks: true, animate: true, motion: "subtle", density: "compact", identityColors: false, icon: "auto", thresholds: { warning: 60, danger: 75 } },
   },
   gitStatus: {
     enabled: true,
