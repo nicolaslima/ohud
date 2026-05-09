@@ -250,6 +250,10 @@ export interface HudConfig {
       hyperlinks?: boolean;
       /** Animate spinner glyph for running activity. Default true. */
       animate?: boolean;
+      /** Cell spacing density. Default "compact". */
+      density?: "compact" | "comfortable" | "airy";
+      /** Show cyan/green/blue identity colors for project/branch/model. Default false (muted). */
+      identityColors?: boolean;
     };
   };
   gitStatus: {

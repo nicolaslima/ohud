@@ -35,7 +35,7 @@ export function render(ctx: RenderContext): string {
         const c = w.renderHush(ctx);
         if (!c) return [];
         const arr = Array.isArray(c) ? c : [c];
-        return arr.map((cell) => ({ ...cell, id: w.id, group: w.group }));
+        return arr.map((cell) => ({ ...cell, id: w.id, group: w.group, priority: cell.priority ?? w.priority }));
       }
       const c = w.render(ctx);
       return c ? [{ ...c, id: w.id, group: w.group }] : [];

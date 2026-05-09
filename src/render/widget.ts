@@ -39,4 +39,10 @@ export interface HushCell {
    *  When absent, "normal" attention cells render without additional color (default fg).
    *  Must be one of the supported SGR palette entries in HushLayout. */
   baseColor?: "cyan" | "green" | "blue" | "magenta" | "yellow" | "red";
+  /** Priority inherited from the emitting Widget — used by HushLayout for overflow truncation. */
+  priority?: number;
+  /** Primary text portion rendered with baseColor (e.g. tool name "Edit"). */
+  primaryText?: string;
+  /** Secondary text portion rendered dim (e.g. count "×6"). */
+  secondaryText?: string;
 }

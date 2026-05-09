@@ -320,14 +320,15 @@ describe("NO_COLOR=1", () => {
     expect(line1).not.toMatch(/\x1b\[\d+m/);
   });
 
-  test("asterisk still present for dirty git in NO_COLOR mode", () => {
+  test("dirty marker present for dirty git in NO_COLOR mode", () => {
     process.env.NO_COLOR = "1";
     const ctx = makeCtx();
     if (ctx.gitStatus) ctx.gitStatus.dirty = true;
     const cells = collectCells([projectWidget], ctx);
     const lines = hushLayout.pack(cells, 200, ctx.config);
     const plain = lines[0]!.replace(/\x1b\]8;;[^\x07]*\x07/g, "").replace(/\x1b\]8;;\x07/g, "");
-    expect(plain).toContain("main*");
+    // Unicode mode: "●", ASCII mode: " *"
+    expect(plain).toMatch(/main ●|main \*/);
   });
 });
 
@@ -714,7 +715,8 @@ describe("hush.animate toggle", () => {
   });
 
   test("display.hush.animate=false: cyan baseColor still applied for running tool", () => {
-    const now = new Date("2024-01-01T00:00:00Z");
+    // Use recent startTime so elapsed < 30s (no warning promotion)
+    const now = new Date(Date.now() - 5_000);
     const ctx = makeCtx({
       transcript: {
         tools: [{ id: "1", name: "Edit", status: "running", startTime: now }],
@@ -827,6 +829,289 @@ describe("glyphMode env injection", () => {
     ctx.config.display.glyphs = "ascii";
     const result = glyphMode(ctx.config, { LANG: "en_US.UTF-8" });
     expect(result).toBe("ascii");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 15: Density — 3-tier separator system
+// ---------------------------------------------------------------------------
+
+describe("density separators", () => {
+  function makeTwoCells(groupA: string, groupB: string): HushCell[] {
+    return [
+      { text: "Alpha", attention: "normal", group: groupA as import("../src/render/widget.js").WidgetGroup },
+      { text: "Beta",  attention: "normal", group: groupB as import("../src/render/widget.js").WidgetGroup },
+    ];
+  }
+
+  test("compact density: same-group cells joined by 1 space", () => {
+    const ctx = makeCtx();
+    ctx.config.display.hush = { density: "compact" };
+    const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
+    expect(stripAnsi(line!)).toBe("Alpha Beta");
+  });
+
+  test("compact density: cross-group cells joined by 2 spaces", () => {
+    const ctx = makeCtx();
+    ctx.config.display.hush = { density: "compact" };
+    const [line] = hushLayout.pack(makeTwoCells("header", "metrics"), 200, ctx.config);
+    expect(stripAnsi(line!)).toBe("Alpha  Beta");
+  });
+
+  test("comfortable density: same-group cells joined by ' · '", () => {
+    const ctx = makeCtx();
+    ctx.config.display.hush = { density: "comfortable" };
+    const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
+    expect(stripAnsi(line!)).toBe("Alpha · Beta");
+  });
+
+  test("comfortable density: cross-group cells joined by 4 spaces", () => {
+    const ctx = makeCtx();
+    ctx.config.display.hush = { density: "comfortable" };
+    const [line] = hushLayout.pack(makeTwoCells("header", "metrics"), 200, ctx.config);
+    expect(stripAnsi(line!)).toBe("Alpha    Beta");
+  });
+
+  test("airy density: same-group cells joined by 2 spaces", () => {
+    const ctx = makeCtx();
+    ctx.config.display.hush = { density: "airy" };
+    const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
+    expect(stripAnsi(line!)).toBe("Alpha  Beta");
+  });
+
+  test("airy density: cross-group cells joined by 6 spaces", () => {
+    const ctx = makeCtx();
+    ctx.config.display.hush = { density: "airy" };
+    const [line] = hushLayout.pack(makeTwoCells("header", "metrics"), 200, ctx.config);
+    expect(stripAnsi(line!)).toBe("Alpha      Beta");
+  });
+
+  test("default density (unset) behaves as compact", () => {
+    const ctx = makeCtx();
+    ctx.config.display.hush = {};
+    const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
+    expect(stripAnsi(line!)).toBe("Alpha Beta");
+  });
+
+  test("project sub-cells (name + branch + model) all have header group → use WITHIN_SEP", () => {
+    const ctx = makeCtx();
+    ctx.config.display.hush = { density: "comfortable" };
+    const cells = collectCells([projectWidget], ctx);
+    expect(cells.every((c) => c.group === "header")).toBe(true);
+    const [line] = hushLayout.pack(cells, 200, ctx.config);
+    const plain = stripAnsi(line!);
+    // comfortable WITHIN_SEP is " · "
+    expect(plain).toContain(" · ");
+    // No 4-space BETWEEN_SEP within header sub-cells
+    expect(plain).not.toContain("    ");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 16: identityColors toggle
+// ---------------------------------------------------------------------------
+
+describe("identityColors toggle", () => {
+  test("identityColors=false (default): header cells render without cyan/green/blue", () => {
+    const ctx = makeCtx();
+    ctx.config.display.hush = { identityColors: false };
+    const cells = projectWidget.renderHush!(ctx) as HushCell[];
+    const tagged = cells.map((c) => ({ ...c, group: "header" as const }));
+    const lines = hushLayout.pack(tagged, 200, ctx.config);
+    const line = lines[0]!;
+    expect(line).not.toContain("\x1b[36m"); // no cyan
+    expect(line).not.toContain("\x1b[32m"); // no green
+    expect(line).not.toContain("\x1b[34m"); // no blue
+  });
+
+  test("identityColors=true: header cells render with their baseColor", () => {
+    const ctx = makeCtx();
+    ctx.config.display.hush = { identityColors: true };
+    const cells = projectWidget.renderHush!(ctx) as HushCell[];
+    const tagged = cells.map((c) => ({ ...c, group: "header" as const }));
+    const lines = hushLayout.pack(tagged, 200, ctx.config);
+    const line = lines[0]!;
+    const hasIdentityColor =
+      line.includes("\x1b[36m") ||  // cyan
+      line.includes("\x1b[32m") ||  // green
+      line.includes("\x1b[34m");    // blue
+    expect(hasIdentityColor).toBe(true);
+  });
+
+  test("identityColors=false does NOT strip non-header (activity) baseColor green", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showTools = true;
+    ctx.config.display.hush = { identityColors: false };
+    ctx.transcript.tools = [
+      { id: "t1", name: "TaskCreate", status: "completed", startTime: new Date(), endTime: new Date() },
+    ];
+    const cells = collectCells([toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    // Done tool (activity group) uses dim+green — identityColors must not suppress it
+    expect(lines[0]).toContain("\x1b[2;32m");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 17: Activity cell cap (MAX_RUNNING=3, MAX_DONE=4)
+// ---------------------------------------------------------------------------
+
+describe("activity cell cap", () => {
+  test("when > 3 running, shows '+N more' cell", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showTools = true;
+    ctx.transcript.tools = [
+      { id: "r1", name: "A", status: "running", startTime: new Date(Date.now() - 1000) },
+      { id: "r2", name: "B", status: "running", startTime: new Date(Date.now() - 1000) },
+      { id: "r3", name: "C", status: "running", startTime: new Date(Date.now() - 1000) },
+      { id: "r4", name: "D", status: "running", startTime: new Date(Date.now() - 1000) },
+    ];
+    const cells = collectCells([toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    expect(stripAnsi(lines.join("\n"))).toContain("+1 more");
+  });
+
+  test("when > 4 done, shows '+N more' cell", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showTools = true;
+    ctx.transcript.tools = [
+      { id: "d1", name: "A", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d2", name: "B", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d3", name: "C", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d4", name: "D", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d5", name: "E", status: "completed", startTime: new Date(), endTime: new Date() },
+    ];
+    const cells = collectCells([toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    expect(stripAnsi(lines.join("\n"))).toContain("+1 more");
+  });
+
+  test("exactly 3 running + 4 done → no '+N more'", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showTools = true;
+    ctx.transcript.tools = [
+      { id: "r1", name: "A", status: "running",   startTime: new Date(Date.now() - 1000) },
+      { id: "r2", name: "B", status: "running",   startTime: new Date(Date.now() - 1000) },
+      { id: "r3", name: "C", status: "running",   startTime: new Date(Date.now() - 1000) },
+      { id: "d1", name: "D", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d2", name: "E", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d3", name: "F", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d4", name: "G", status: "completed", startTime: new Date(), endTime: new Date() },
+    ];
+    const cells = collectCells([toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    expect(stripAnsi(lines.join("\n"))).not.toContain("more");
+  });
+
+  test("mixed overflow: combined running+done excess in '+N more'", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showTools = true;
+    ctx.transcript.tools = [
+      { id: "r1", name: "A", status: "running",   startTime: new Date(Date.now() - 1000) },
+      { id: "r2", name: "B", status: "running",   startTime: new Date(Date.now() - 1000) },
+      { id: "r3", name: "C", status: "running",   startTime: new Date(Date.now() - 1000) },
+      { id: "r4", name: "D", status: "running",   startTime: new Date(Date.now() - 1000) }, // +1
+      { id: "d1", name: "E", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d2", name: "F", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d3", name: "G", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d4", name: "H", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d5", name: "I", status: "completed", startTime: new Date(), endTime: new Date() }, // +1
+    ];
+    const cells = collectCells([toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    expect(stripAnsi(lines.join("\n"))).toContain("+2 more");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 18: Priority-aware truncation
+// ---------------------------------------------------------------------------
+
+describe("priority-aware truncation", () => {
+  test("low-priority cell dropped before high-priority when line overflows", () => {
+    const ctx = makeCtx();
+    const cells: HushCell[] = [
+      { text: "project-name", attention: "normal", group: "header",  priority: 100 },
+      { text: "metric-low",   attention: "normal", group: "metrics", priority: 10 },
+    ];
+    // Narrow terminal that can fit "project-name" (12) but not both with 2-space sep (26)
+    const lines = hushLayout.pack(cells, 14, ctx.config);
+    const plain = stripAnsi(lines[0]!);
+    expect(plain).toContain("project-name");
+    expect(plain).not.toContain("metric-low");
+  });
+
+  test("header cell survives when lower-priority metrics overflow", () => {
+    const ctx = makeCtx();
+    const cells: HushCell[] = [
+      { text: "ohud",      attention: "normal", group: "header",  priority: 100 },
+      { text: "usage-pct", attention: "normal", group: "metrics", priority: 40 },
+      { text: "api-time",  attention: "normal", group: "metrics", priority: 50 },
+    ];
+    const lines = hushLayout.pack(cells, 10, ctx.config);
+    const plain = stripAnsi(lines[0]!);
+    expect(plain).toContain("ohud");
+  });
+
+  test("higher-priority metric kept over lower-priority metric", () => {
+    const ctx = makeCtx();
+    const cells: HushCell[] = [
+      { text: "ohud", attention: "normal", group: "header",  priority: 100 },
+      { text: "low",  attention: "normal", group: "metrics", priority: 30 },
+      { text: "high", attention: "normal", group: "metrics", priority: 80 },
+    ];
+    // Width fits "ohud  high" (10) but not all three with separators (ohud+2+low+2+high=19)
+    const lines = hushLayout.pack(cells, 12, ctx.config);
+    const plain = stripAnsi(lines[0]!);
+    expect(plain).not.toContain("low");
+    expect(plain).toContain("high");
+  });
+
+  test("all cells fit → no truncation, all content present", () => {
+    const ctx = makeCtx();
+    const cells: HushCell[] = [
+      { text: "A", attention: "normal", group: "header",  priority: 100 },
+      { text: "B", attention: "normal", group: "metrics", priority: 50 },
+    ];
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const plain = stripAnsi(lines[0]!);
+    expect(plain).toContain("A");
+    expect(plain).toContain("B");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 19: primaryText + secondaryText rendering
+// ---------------------------------------------------------------------------
+
+describe("primaryText + secondaryText rendering", () => {
+  test("when both present, renders as 'primary dim(secondary)'", () => {
+    const ctx = makeCtx();
+    const cells: HushCell[] = [{
+      text: "Edit ×2",     // fallback ignored when primaryText+secondaryText present
+      primaryText: "Edit",
+      secondaryText: "×2",
+      attention: "normal",
+      baseColor: "cyan",
+      group: "activity",
+    }];
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const plain = stripAnsi(lines[0]!);
+    expect(plain).toContain("Edit");
+    expect(plain).toContain("×2");
+    // dim SGR present for secondaryText
+    expect(lines[0]).toContain("\x1b[2m");
+  });
+
+  test("when only text present, falls back to text field", () => {
+    const ctx = makeCtx();
+    const cells: HushCell[] = [{
+      text: "Edit ×2",
+      attention: "normal",
+      group: "activity",
+    }];
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    expect(stripAnsi(lines[0]!)).toBe("Edit ×2");
   });
 });
 
