@@ -1,7 +1,9 @@
 ---
-description: First-time setup for ohud — detect runtime, write statusLine config
+description: (Optional) Override statusLine command — most users do not need this
 allowed-tools: Bash, Read, Edit, Write
 ---
+
+> **Note**: ohud now activates automatically via `plugin.json:statusLine` after `/plugin install ohud`. This command is only needed if you want to wrap the runtime (e.g., `bun --hot dist/index.js` for development).
 
 Goal: configure `ohud` as the user's Claude Code statusline. After this command runs, restarting Claude Code should display the HUD.
 

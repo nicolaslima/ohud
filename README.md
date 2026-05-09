@@ -14,10 +14,11 @@ Plus opt-in lines for tools activity, agent status, todo progress, environment c
 ```
 /plugin marketplace add nicolaslima/ohud
 /plugin install ohud
-/ohud setup
 ```
 
-Restart Claude Code so it picks up the new statusLine config.
+Restart Claude Code (Cmd+Q on macOS, then reopen). The HUD appears automatically.
+
+**Optional**: run `/ohud configure` to pick a preset (Full / Essential / Minimal). Run `/ohud doctor` if anything looks wrong.
 
 ## Configure
 
