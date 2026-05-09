@@ -22,16 +22,41 @@ export function renderUsage(ctx: RenderContext): string | null {
   return `${color(c.label, "Usage")} ${parts.join(" | ")}`;
 }
 
-function formatWindow(ctx: RenderContext, label: string, pct: number, _resetAt: Date | null): string {
+function formatWindow(ctx: RenderContext, label: string, pct: number, resetAt: Date | null): string {
   const c = ctx.config.colors;
   let lineColor = c.usage;
   if (pct >= 85) lineColor = c.critical;
   else if (pct >= 60) lineColor = c.usageWarning;
 
+  let core: string;
   if (ctx.config.display.usageBarEnabled && !ctx.config.display.usageCompact) {
     const filled = Math.floor((pct * BAR_WIDTH) / 100);
     const bar = "█".repeat(filled) + "░".repeat(BAR_WIDTH - filled);
-    return `${color(lineColor, bar)} ${color(lineColor, `${pct}%`)} (${label})`;
+    core = `${color(lineColor, bar)} ${color(lineColor, `${pct}%`)} (${label})`;
+  } else {
+    core = color(lineColor, `${label}: ${pct}%`);
   }
-  return color(lineColor, `${label}: ${pct}%`);
+
+  if (ctx.config.display.showResetLabel && resetAt) {
+    core += " " + color(c.label, formatReset(resetAt, ctx.config.display.timeFormat));
+  }
+  return core;
+}
+
+function formatReset(resetAt: Date, fmt: "relative" | "absolute" | "both"): string {
+  const deltaMs = resetAt.getTime() - Date.now();
+  const rel = relativeTime(deltaMs);
+  if (fmt === "relative") return `resets in ${rel}`;
+  const abs = resetAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (fmt === "absolute") return `resets at ${abs}`;
+  return `resets in ${rel} (${abs})`;
+}
+
+function relativeTime(ms: number): string {
+  if (ms <= 0) return "now";
+  const min = Math.floor(ms / 60_000);
+  if (min < 60) return `~${min}m`;
+  const h = Math.floor(min / 60);
+  const remM = min % 60;
+  return remM > 0 ? `~${h}h${remM}m` : `~${h}h`;
 }

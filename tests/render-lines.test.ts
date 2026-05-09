@@ -262,6 +262,68 @@ test("duration line null when toggle off", () => {
   expect(renderDuration(ctx)).toBeNull();
 });
 
+test("project line includes effort level when showEffortLevel and effortLevel set", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showEffortLevel = true;
+  ctx.effortLevel = "max";
+  const out = renderProject(ctx);
+  expect(out).toContain("max");
+  expect(out).toContain("effort:");
+});
+
+test("git block includes ahead/behind when showAheadBehind", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.gitStatus.showAheadBehind = true;
+  ctx.gitStatus = { branch: "main", dirty: false, ahead: 3, behind: 1 };
+  const out = renderProject(ctx);
+  expect(out).toMatch(/main.*↑3.*↓1/);
+});
+
+test("git block omits ahead/behind when both zero", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.gitStatus.showAheadBehind = true;
+  ctx.gitStatus = { branch: "main", dirty: false, ahead: 0, behind: 0 };
+  const out = renderProject(ctx);
+  expect(out).not.toContain("↑");
+  expect(out).not.toContain("↓");
+});
+
+test("usage line shows reset label when showResetLabel + timeFormat=relative", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showUsage = true;
+  ctx.config.display.showResetLabel = true;
+  ctx.config.display.timeFormat = "relative";
+  ctx.config.display.usageBarEnabled = false;
+  ctx.usageData = {
+    fiveHour: 50, sevenDay: null,
+    fiveHourResetAt: new Date(Date.now() + 3_600_000),
+    sevenDayResetAt: null,
+  };
+  const out = renderUsage(ctx);
+  expect(out).toMatch(/resets in/);
+  expect(out).toMatch(/~1h|~59m/);
+});
+
+test("usage line omits reset label when showResetLabel=false", () => {
+  const stdin = fx("stdin-anthropic-pro.json");
+  const ctx = makeCtx(stdin, "anthropic");
+  ctx.config.display.showUsage = true;
+  ctx.config.display.showResetLabel = false;
+  ctx.config.display.timeFormat = "relative";
+  ctx.config.display.usageBarEnabled = false;
+  ctx.usageData = {
+    fiveHour: 50, sevenDay: null,
+    fiveHourResetAt: new Date(Date.now() + 3_600_000),
+    sevenDayResetAt: null,
+  };
+  const out = renderUsage(ctx);
+  expect(out).not.toMatch(/resets/);
+});
+
 // Integration tests for render orchestrator
 import { render } from "../src/render/index.js";
 

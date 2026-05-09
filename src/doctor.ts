@@ -13,14 +13,14 @@ import type { HudConfig } from "./types.js";
 // (Use broader pattern "\.display\." to catch ctx.config.display.* as well.)
 // This Set will need updating after Tasks 7 (delete dead config) and 8 (implement Pilha A).
 const CONSUMED_FLAGS = new Set([
-  // display flags read by render/ or src/ orchestrator code (empirically verified via grep)
-  "contextValue", "externalUsageFreshnessMs", "externalUsagePath",
-  "promptCacheTtlSeconds", "sevenDayThreshold",
-  "showAgents", "showApiTime", "showConfigCounts", "showContextBar", "showCost",
-  "showDuration", "showEffortLevel", "showMemoryUsage", "showModel",
-  "showPromptCache", "showSpeed", "showTodos", "showTools", "showUsage",
-  "usageBarEnabled", "usageCompact",
-  // gitStatus flags (also checked explicitly in renderFlagAnnotations: enabled, showDirty)
+  // Display flags read by render/lines/*.ts or src/index.ts orchestrator
+  "showModel", "showContextBar", "contextValue", "showApiTime", "showUsage",
+  "usageBarEnabled", "usageCompact", "showResetLabel", "timeFormat", "sevenDayThreshold",
+  "externalUsagePath", "externalUsageFreshnessMs", "showCost", "showPromptCache",
+  "promptCacheTtlSeconds", "showTools", "showAgents", "showTodos", "showConfigCounts",
+  "showDuration", "showSpeed", "showMemoryUsage", "showEffortLevel",
+  // GitStatus flags read by render/lines/project.ts
+  "showAheadBehind", "pushWarningThreshold", "pushCriticalThreshold",
 ]);
 
 interface DoctorOpts {
