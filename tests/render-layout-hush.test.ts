@@ -139,14 +139,15 @@ describe("Idle state", () => {
     expect(plain).toContain("15%");
   });
 
-  test("separator between cells is exactly two spaces", () => {
+  test("cross-group separator is ' · ' (compact default, dim middle dot)", () => {
     const ctx = makeCtx({ stdin: { context_window: { used_percentage: 15 } } });
     const cells = collectCells([projectWidget, contextWidget], ctx);
     const [line1] = hushLayout.pack(cells, 200, ctx.config);
     const plain = stripAnsi(line1!);
-    // Check two spaces but not three consecutive spaces
-    expect(plain).toContain("  ");
-    expect(plain).not.toMatch(/   /); // no three consecutive spaces
+    // The middle dot signals group boundaries without consuming much space.
+    expect(plain).toContain(" · ");
+    // Within-group cells (project sub-cells) still use single space — no excess padding.
+    expect(plain).not.toMatch(/   /);
   });
 });
 
@@ -210,6 +211,30 @@ describe("Active state", () => {
     const lines = hushLayout.pack(cells, 200, ctx.config);
     const activityPlain = stripAnsi(lines[0]!);
     expect(activityPlain).toContain("×2"); // Edit ×2
+  });
+
+  test("activity line drops whole cells (not mid-word) when narrow + accumulates +N more", () => {
+    const ctx = makeCtx({});
+    ctx.config.display.showTools = true;
+    // 2 running + 4 distinct done tools — well past what fits in a narrow term.
+    ctx.transcript.tools = [
+      { id: "r1", name: "Edit",       status: "running", startTime: new Date() },
+      { id: "r2", name: "Read",       status: "running", startTime: new Date() },
+      { id: "d1", name: "Bash",       status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d2", name: "TaskCreate", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d3", name: "ToolSearch", status: "completed", startTime: new Date(), endTime: new Date() },
+      { id: "d4", name: "Glob",       status: "completed", startTime: new Date(), endTime: new Date() },
+    ];
+    const cells = collectCells([toolsWidget], ctx);
+    // Narrow width that forces drops. Activity line is the first/only line
+    // since no metrics widgets are included.
+    const lines = hushLayout.pack(cells, 40, ctx.config);
+    const activityPlain = stripAnsi(lines[0]!);
+
+    // No truncated tool names — every visible name is whole.
+    expect(activityPlain).not.toMatch(/[A-Za-z]…/);
+    // Drop indicator surfaces hidden cells.
+    expect(activityPlain).toMatch(/\+\d+ more/);
   });
 });
 
@@ -852,11 +877,18 @@ describe("density separators", () => {
     expect(stripAnsi(line!)).toBe("Alpha Beta");
   });
 
-  test("compact density: cross-group cells joined by 2 spaces", () => {
+  test("compact density: cross-group cells joined by ' · ' (dim middle dot)", () => {
     const ctx = makeCtx();
     ctx.config.display.hush = { density: "compact" };
     const [line] = hushLayout.pack(makeTwoCells("header", "metrics"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha  Beta");
+    expect(stripAnsi(line!)).toBe("Alpha · Beta");
+  });
+
+  test("compact density: cross-group dot wears dim SGR (\\x1b[2m...\\x1b[22m) when colors enabled", () => {
+    const ctx = makeCtx();
+    ctx.config.display.hush = { density: "compact" };
+    const [line] = hushLayout.pack(makeTwoCells("header", "metrics"), 200, ctx.config);
+    expect(line!).toContain("\x1b[2m·\x1b[22m");
   });
 
   test("comfortable density: same-group cells joined by ' · '", () => {

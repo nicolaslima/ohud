@@ -90,11 +90,30 @@ interface Separators {
   between: string;  // between cells of different groups
 }
 
-function resolveSeparators(density: "compact" | "comfortable" | "airy" | undefined): Separators {
+/**
+ * Build the 3-tier separator set for a density.
+ *
+ * The middle-dot `·` (U+00B7) wrapped in dim SGR is the visual signature of
+ * Hush. It marks group boundaries without consuming much horizontal space and
+ * respects terminal themes (no fixed color, just dim).
+ *
+ * - compact     : within=` ` (terse) ; between=` · ` (single dot, dim)
+ * - comfortable : within=` · ` (dim) ; between=4 spaces (open grid)
+ * - airy        : within=2 spaces    ; between=6 spaces (table-like)
+ *
+ * In NO_COLOR/dumb-term environments the dot stays but the dim wrap is
+ * suppressed (still semantic, just full-bright).
+ */
+function resolveSeparators(
+  density: "compact" | "comfortable" | "airy" | undefined,
+  env: NodeJS.ProcessEnv,
+): Separators {
+  const noColor = isColorDisabled(env);
+  const dot = noColor ? "·" : "\x1b[2m·\x1b[22m";
   switch (density) {
-    case "comfortable": return { within: " · ", between: "    " };
-    case "airy":        return { within: "  ",  between: "      " };
-    default:            return { within: " ",   between: "  " };  // compact
+    case "comfortable": return { within: ` ${dot} `, between: "    " };
+    case "airy":        return { within: "  ",       between: "      " };
+    default:            return { within: " ",        between: ` ${dot} ` };  // compact
   }
 }
 
@@ -282,6 +301,56 @@ function truncateByPriority(
   return truncateLine(joinCells(renderPairs(cells.slice(0, 1)), seps), termWidth);
 }
 
+/**
+ * Pack the activity line, dropping whole cells (newest first, so done before
+ * running since done sit at the tail of capActivityCells output) when overflowed.
+ * Regenerates the trailing "+N more" indicator with the cumulative drop count.
+ *
+ * Replaces a previous `truncateLine` call that cut mid-string (producing
+ * artifacts like `Bas…` truncating "Bash"). Cell-level granularity keeps the
+ * activity readable.
+ */
+function packActivityLine(
+  cells: HushCell[],
+  now: number,
+  mode: "unicode" | "ascii",
+  env: NodeJS.ProcessEnv,
+  toggles: HushToggles,
+  seps: Separators,
+  termWidth: number,
+): string {
+  const renderPairs = (cs: HushCell[]) =>
+    cs.map((c) => ({ rendered: renderCell(c, now, mode, env, toggles), group: c.group }));
+
+  // Detect a trailing "+N more" cell from capActivityCells and lift its count
+  // so we can re-emit a unified indicator after additional drops.
+  const last = cells[cells.length - 1];
+  const moreMatch = last ? /^\+(\d+) more$/.exec(last.text) : null;
+  const initialMore = moreMatch ? Number.parseInt(moreMatch[1]!, 10) : 0;
+  const main: HushCell[] = moreMatch ? cells.slice(0, -1) : [...cells];
+
+  let droppedExtra = 0;
+  const build = (): string => {
+    const total = initialMore + droppedExtra;
+    const tail: HushCell[] = total > 0
+      ? [{ text: `+${total} more`, attention: "muted", group: "activity" }]
+      : [];
+    return joinCells(renderPairs([...main, ...tail]), seps);
+  };
+
+  let result = build();
+  while (stripAnsiWidth(result) > termWidth && main.length > 0) {
+    main.pop();   // drop newest cell (done first, then newest running)
+    droppedExtra += 1;
+    result = build();
+  }
+  // Last resort: hard truncate when even an empty list overflows (very narrow term)
+  if (stripAnsiWidth(result) > termWidth) {
+    result = truncateLine(result, termWidth);
+  }
+  return result;
+}
+
 /** Approximate visual width by stripping ANSI SGR codes and OSC 8 sequences. */
 function stripAnsiWidth(s: string): number {
   return s
@@ -309,7 +378,7 @@ export const hushLayout: Layout = {
     const env = process.env;
     const mode = glyphMode(config, env);
     const density = config.display.hush?.density ?? "compact";
-    const seps = resolveSeparators(density);
+    const seps = resolveSeparators(density, env);
 
     // Read user toggles from config; both default to true per plan section 5.
     const toggles: HushToggles = {
@@ -330,13 +399,9 @@ export const hushLayout: Layout = {
     const line1Cells = [...headerCells, ...metricsCells];
     const line1 = truncateByPriority(line1Cells, now, mode, env, toggles, seps, termWidth);
 
-    // Build line 2: activity cells joined with WITHIN_SEP (all activity, same "group" boundary)
-    const line2Parts = cappedActivity.map((c) => ({
-      rendered: renderCell(c, now, mode, env, toggles),
-      group: c.group,
-    }));
-    const line2Raw = joinCells(line2Parts, seps);
-    const line2 = truncateLine(line2Raw, termWidth);
+    // Build line 2: activity cells, with cell-level (not string) truncation
+    // so we never split a tool name mid-word under width pressure.
+    const line2 = packActivityLine(cappedActivity, now, mode, env, toggles, seps, termWidth);
 
     const lines: string[] = [];
     if (line1) lines.push(line1);

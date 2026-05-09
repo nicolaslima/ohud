@@ -2160,14 +2160,16 @@ function glyphMode(config, env) {
     return "unicode";
   return "ascii";
 }
-function resolveSeparators(density) {
+function resolveSeparators(density, env) {
+  const noColor = isColorDisabled(env);
+  const dot = noColor ? "·" : "\x1B[2m·\x1B[22m";
   switch (density) {
     case "comfortable":
-      return { within: " · ", between: "    " };
+      return { within: ` ${dot} `, between: "    " };
     case "airy":
       return { within: "  ", between: "      " };
     default:
-      return { within: " ", between: "  " };
+      return { within: " ", between: ` ${dot} ` };
   }
 }
 function effectiveBaseColor(cell, toggles) {
@@ -2277,6 +2279,29 @@ function truncateByPriority(cells, now, mode, env, toggles, seps, termWidth) {
   }
   return truncateLine(joinCells(renderPairs(cells.slice(0, 1)), seps), termWidth);
 }
+function packActivityLine(cells, now, mode, env, toggles, seps, termWidth) {
+  const renderPairs = (cs) => cs.map((c) => ({ rendered: renderCell(c, now, mode, env, toggles), group: c.group }));
+  const last = cells[cells.length - 1];
+  const moreMatch = last ? /^\+(\d+) more$/.exec(last.text) : null;
+  const initialMore = moreMatch ? Number.parseInt(moreMatch[1], 10) : 0;
+  const main = moreMatch ? cells.slice(0, -1) : [...cells];
+  let droppedExtra = 0;
+  const build = () => {
+    const total = initialMore + droppedExtra;
+    const tail = total > 0 ? [{ text: `+${total} more`, attention: "muted", group: "activity" }] : [];
+    return joinCells(renderPairs([...main, ...tail]), seps);
+  };
+  let result = build();
+  while (stripAnsiWidth(result) > termWidth && main.length > 0) {
+    main.pop();
+    droppedExtra += 1;
+    result = build();
+  }
+  if (stripAnsiWidth(result) > termWidth) {
+    result = truncateLine(result, termWidth);
+  }
+  return result;
+}
 function stripAnsiWidth(s) {
   return s.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x07]*\x07[^\x1b]*\x1b\]8;;\x07/g, (m) => {
     const inner = m.replace(/\x1b\]8;;[^\x07]*\x07/g, "").replace(/\x1b\]8;;\x07/g, "");
@@ -2291,7 +2316,7 @@ var hushLayout = {
     const env = process.env;
     const mode = glyphMode(config, env);
     const density = config.display.hush?.density ?? "compact";
-    const seps = resolveSeparators(density);
+    const seps = resolveSeparators(density, env);
     const toggles = {
       hyperlinks: config.display.hush?.hyperlinks !== false,
       animate: config.display.hush?.animate !== false,
@@ -2303,12 +2328,7 @@ var hushLayout = {
     const cappedActivity = capActivityCells(activityCells);
     const line1Cells = [...headerCells, ...metricsCells];
     const line1 = truncateByPriority(line1Cells, now, mode, env, toggles, seps, termWidth);
-    const line2Parts = cappedActivity.map((c) => ({
-      rendered: renderCell(c, now, mode, env, toggles),
-      group: c.group
-    }));
-    const line2Raw = joinCells(line2Parts, seps);
-    const line2 = truncateLine(line2Raw, termWidth);
+    const line2 = packActivityLine(cappedActivity, now, mode, env, toggles, seps, termWidth);
     const lines = [];
     if (line1)
       lines.push(line1);
