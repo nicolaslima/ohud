@@ -1,7 +1,7 @@
 // tests/transcript.test.ts
 import { test, expect } from "bun:test";
 import { join } from "node:path";
-import { parseTranscript } from "../src/transcript.js";
+import { parseTranscript, computeTokensPerSecond } from "../src/transcript.js";
 
 const fx = (n: string) => join(import.meta.dir, "fixtures", n);
 
@@ -39,4 +39,75 @@ test("parseTranscript skips re-parse when stat is unchanged", async () => {
   const elapsed = performance.now() - start;
   expect(elapsed).toBeLessThan(2); // cache hit should be ≤2ms
   expect(t2.tools).toEqual(t1.tools);
+});
+
+// --- Goal 1: Tool error detection ---
+
+test("hasError=true when tool_result has is_error:true at top level", async () => {
+  const t = await parseTranscript(join(import.meta.dir, "fixtures/transcript-errors.jsonl"));
+  const bashTool = t.tools.find((x) => x.name === "Bash");
+  expect(bashTool).toBeDefined();
+  expect(bashTool!.hasError).toBe(true);
+});
+
+test("hasError=true when tool_result content matches stderr-style error pattern", async () => {
+  const t = await parseTranscript(join(import.meta.dir, "fixtures/transcript-errors.jsonl"));
+  // Bash tool result is "Error: ENOENT no such file..." — matches both is_error AND pattern
+  const bash = t.tools.find((x) => x.name === "Bash");
+  expect(bash!.hasError).toBe(true);
+});
+
+test("hasError stays undefined for successful tool_result", async () => {
+  const t = await parseTranscript(join(import.meta.dir, "fixtures/transcript-errors.jsonl"));
+  const readTool = t.tools.find((x) => x.name === "Read");
+  expect(readTool).toBeDefined();
+  expect(readTool!.hasError).toBeUndefined();
+  const writeTool = t.tools.find((x) => x.name === "Write");
+  expect(writeTool).toBeDefined();
+  expect(writeTool!.hasError).toBeUndefined();
+});
+
+// --- Goal 2: tokens/sec helper ---
+
+test("computeTokensPerSecond returns null with 0 assistant messages", () => {
+  const t = { tools: [], agents: [], todos: [], assistantMessages: [] };
+  expect(computeTokensPerSecond(t)).toBeNull();
+});
+
+test("computeTokensPerSecond returns null with 1 assistant message", () => {
+  const t = {
+    tools: [], agents: [], todos: [],
+    assistantMessages: [{ timestamp: new Date("2026-05-08T10:00:01.000Z"), outputTokens: 50 }],
+  };
+  expect(computeTokensPerSecond(t)).toBeNull();
+});
+
+test("computeTokensPerSecond returns null when elapsed < 1s", () => {
+  const t = {
+    tools: [], agents: [], todos: [],
+    assistantMessages: [
+      { timestamp: new Date("2026-05-08T10:00:01.000Z"), outputTokens: 100 },
+      { timestamp: new Date("2026-05-08T10:00:01.500Z"), outputTokens: 200 },
+    ],
+  };
+  expect(computeTokensPerSecond(t)).toBeNull();
+});
+
+test("computeTokensPerSecond returns expected integer for 2 messages with known tokens", () => {
+  // 30 + 70 = 100 output tokens over 10 seconds = 10 tok/sec
+  const t = {
+    tools: [], agents: [], todos: [],
+    assistantMessages: [
+      { timestamp: new Date("2026-05-08T10:00:01.000Z"), outputTokens: 30 },
+      { timestamp: new Date("2026-05-08T10:00:11.000Z"), outputTokens: 70 },
+    ],
+  };
+  expect(computeTokensPerSecond(t)).toBe(10);
+});
+
+test("computeTokensPerSecond parses multi-assistant fixture correctly", async () => {
+  const t = await parseTranscript(join(import.meta.dir, "fixtures/transcript-multi-assistant.jsonl"));
+  // 30 + 70 = 100 tokens, elapsed = 10s → 10 tok/sec
+  const tps = computeTokensPerSecond(t);
+  expect(tps).toBe(10);
 });

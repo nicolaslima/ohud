@@ -545,6 +545,20 @@ function resolveMode(stdin, probe) {
 
 // src/transcript.ts
 import { readFile as readFile2, stat } from "node:fs/promises";
+var ERROR_CONTENT_RE = /^Error[: ]|exit code [1-9]|ENOENT|EACCES|EPERM|EISDIR|ENOTDIR/i;
+function isErrorContent(content) {
+  if (typeof content === "string")
+    return ERROR_CONTENT_RE.test(content);
+  if (Array.isArray(content)) {
+    return content.some((block) => {
+      if (typeof block !== "object" || block === null)
+        return false;
+      const b = block;
+      return typeof b.text === "string" && ERROR_CONTENT_RE.test(b.text);
+    });
+  }
+  return false;
+}
 var cache = new Map;
 async function parseTranscript(path) {
   if (!path)
@@ -570,7 +584,7 @@ async function parseTranscript(path) {
   return data;
 }
 function empty() {
-  return { tools: [], agents: [], todos: [] };
+  return { tools: [], agents: [], todos: [], assistantMessages: [] };
 }
 function parseRaw(raw) {
   const lines = raw.split(`
@@ -584,6 +598,7 @@ function parseRaw(raw) {
     cacheCreationTokens: 0,
     cacheReadTokens: 0
   };
+  const assistantMessages = [];
   let sessionStart;
   let lastAssistantResponseAt;
   let sessionName;
@@ -608,12 +623,15 @@ function parseRaw(raw) {
     if (!message)
       continue;
     if (type === "assistant" && message.usage) {
+      const outTokens = Number(message.usage.output_tokens ?? 0);
       tokens.inputTokens += Number(message.usage.input_tokens ?? 0);
-      tokens.outputTokens += Number(message.usage.output_tokens ?? 0);
+      tokens.outputTokens += outTokens;
       tokens.cacheCreationTokens += Number(message.usage.cache_creation_input_tokens ?? 0);
       tokens.cacheReadTokens += Number(message.usage.cache_read_input_tokens ?? 0);
-      if (ts)
+      if (ts) {
         lastAssistantResponseAt = ts;
+        assistantMessages.push({ timestamp: ts, outputTokens: outTokens });
+      }
     }
     if (Array.isArray(message.content)) {
       for (const block of message.content) {
@@ -648,8 +666,13 @@ function parseRaw(raw) {
         if (b.type === "tool_result" && typeof b.tool_use_id === "string") {
           const tool = tools.get(b.tool_use_id);
           if (tool) {
-            tool.status = "completed";
             tool.endTime = ts;
+            if (b.is_error === true || isErrorContent(b.content)) {
+              tool.status = "error";
+              tool.hasError = true;
+            } else {
+              tool.status = "completed";
+            }
           }
           const agent = agents.get(b.tool_use_id);
           if (agent) {
@@ -664,6 +687,7 @@ function parseRaw(raw) {
     tools: [...tools.values()],
     agents: [...agents.values()],
     todos: latestTodos,
+    assistantMessages,
     sessionStart,
     sessionName,
     lastAssistantResponseAt,

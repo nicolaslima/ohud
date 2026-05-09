@@ -109,6 +109,23 @@ export interface ToolEntry {
   status: "running" | "completed" | "error";
   startTime: Date;
   endTime?: Date;
+  /** Set to true when the paired tool_result indicated an error. Omitted on success. */
+  hasError?: boolean;
+}
+
+/** One assistant turn captured for speed/timing analysis. */
+export interface AssistantMessage {
+  timestamp: Date;
+  outputTokens: number;
+}
+
+/**
+ * Extended transcript shape returned by parseTranscript.
+ * Adds assistantMessages for tokens-per-second computation.
+ * Satisfies TranscriptData structurally so existing callers are unaffected.
+ */
+export interface ParsedTranscript extends TranscriptData {
+  assistantMessages: AssistantMessage[];
 }
 
 export interface AgentEntry {

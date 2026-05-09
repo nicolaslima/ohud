@@ -1,11 +1,27 @@
 // src/transcript.ts
 import { readFile, stat } from "node:fs/promises";
-import type { AgentEntry, SessionTokens, TodoItem, ToolEntry, TranscriptData } from "./types.js";
+import type { AgentEntry, AssistantMessage, ParsedTranscript, SessionTokens, TodoItem, ToolEntry } from "./types.js";
 
-interface CacheEntry { size: number; mtimeMs: number; data: TranscriptData; }
+// Matches common error patterns in tool_result content strings.
+const ERROR_CONTENT_RE = /^Error[: ]|exit code [1-9]|ENOENT|EACCES|EPERM|EISDIR|ENOTDIR/i;
+
+/** Returns true if a tool_result content value indicates an error. */
+function isErrorContent(content: unknown): boolean {
+  if (typeof content === "string") return ERROR_CONTENT_RE.test(content);
+  if (Array.isArray(content)) {
+    return content.some((block) => {
+      if (typeof block !== "object" || block === null) return false;
+      const b = block as Record<string, unknown>;
+      return typeof b.text === "string" && ERROR_CONTENT_RE.test(b.text);
+    });
+  }
+  return false;
+}
+
+interface CacheEntry { size: number; mtimeMs: number; data: ParsedTranscript; }
 const cache = new Map<string, CacheEntry>();
 
-export async function parseTranscript(path: string): Promise<TranscriptData> {
+export async function parseTranscript(path: string): Promise<ParsedTranscript> {
   if (!path) return empty();
   let st;
   try { st = await stat(path); } catch { return empty(); }
@@ -20,11 +36,11 @@ export async function parseTranscript(path: string): Promise<TranscriptData> {
   return data;
 }
 
-function empty(): TranscriptData {
-  return { tools: [], agents: [], todos: [] };
+function empty(): ParsedTranscript {
+  return { tools: [], agents: [], todos: [], assistantMessages: [] };
 }
 
-function parseRaw(raw: string): TranscriptData {
+function parseRaw(raw: string): ParsedTranscript {
   const lines = raw.split("\n").filter((l) => l.length > 0);
 
   const tools = new Map<string, ToolEntry>();
@@ -33,6 +49,7 @@ function parseRaw(raw: string): TranscriptData {
   const tokens: SessionTokens = {
     inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0,
   };
+  const assistantMessages: AssistantMessage[] = [];
   let sessionStart: Date | undefined;
   let lastAssistantResponseAt: Date | undefined;
   let sessionName: string | undefined;
@@ -55,11 +72,15 @@ function parseRaw(raw: string): TranscriptData {
     if (!message) continue;
 
     if (type === "assistant" && message.usage) {
+      const outTokens = Number(message.usage.output_tokens ?? 0);
       tokens.inputTokens += Number(message.usage.input_tokens ?? 0);
-      tokens.outputTokens += Number(message.usage.output_tokens ?? 0);
+      tokens.outputTokens += outTokens;
       tokens.cacheCreationTokens += Number(message.usage.cache_creation_input_tokens ?? 0);
       tokens.cacheReadTokens += Number(message.usage.cache_read_input_tokens ?? 0);
-      if (ts) lastAssistantResponseAt = ts;
+      if (ts) {
+        lastAssistantResponseAt = ts;
+        assistantMessages.push({ timestamp: ts, outputTokens: outTokens });
+      }
     }
 
     if (Array.isArray(message.content)) {
@@ -85,7 +106,16 @@ function parseRaw(raw: string): TranscriptData {
         }
         if (b.type === "tool_result" && typeof b.tool_use_id === "string") {
           const tool = tools.get(b.tool_use_id);
-          if (tool) { tool.status = "completed"; tool.endTime = ts; }
+          if (tool) {
+            tool.endTime = ts;
+            // Determine error state: top-level is_error flag OR content pattern match
+            if (b.is_error === true || isErrorContent(b.content)) {
+              tool.status = "error";
+              tool.hasError = true;
+            } else {
+              tool.status = "completed";
+            }
+          }
           const agent = agents.get(b.tool_use_id);
           if (agent) { agent.status = "completed"; agent.endTime = ts; }
         }
@@ -97,11 +127,27 @@ function parseRaw(raw: string): TranscriptData {
     tools: [...tools.values()],
     agents: [...agents.values()],
     todos: latestTodos,
+    assistantMessages,
     sessionStart,
     sessionName,
     lastAssistantResponseAt,
     sessionTokens: tokens.inputTokens + tokens.outputTokens > 0 ? tokens : undefined,
   };
+}
+
+/**
+ * Computes approximate tokens per second for the session.
+ * Sums output_tokens across all assistant messages, divides by elapsed seconds
+ * between first and last assistant message timestamps.
+ * Returns null when fewer than 2 messages exist or elapsed time is < 1s.
+ */
+export function computeTokensPerSecond(transcript: Pick<ParsedTranscript, "assistantMessages">): number | null {
+  const msgs = transcript.assistantMessages;
+  if (msgs.length < 2) return null;
+  const elapsedMs = msgs[msgs.length - 1].timestamp.getTime() - msgs[0].timestamp.getTime();
+  if (elapsedMs < 1000) return null; // guard: < 1 second of elapsed time
+  const totalTokens = msgs.reduce((sum, m) => sum + m.outputTokens, 0);
+  return Math.round(totalTokens / (elapsedMs / 1000));
 }
 
 function extractTarget(input: unknown): string | undefined {
