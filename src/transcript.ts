@@ -107,13 +107,13 @@ function parseRaw(raw: string): ParsedTranscript {
         if (b.type === "tool_result" && typeof b.tool_use_id === "string") {
           const tool = tools.get(b.tool_use_id);
           if (tool) {
+            // T1 is additive: status stays "completed" so existing fade/freshDone
+            // logic in render/widgets/tools.ts behaves identically. hasError is
+            // a sidecar flag for downstream widgets that want to surface errors.
+            tool.status = "completed";
             tool.endTime = ts;
-            // Determine error state: top-level is_error flag OR content pattern match
             if (b.is_error === true || isErrorContent(b.content)) {
-              tool.status = "error";
               tool.hasError = true;
-            } else {
-              tool.status = "completed";
             }
           }
           const agent = agents.get(b.tool_use_id);

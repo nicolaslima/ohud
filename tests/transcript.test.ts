@@ -57,6 +57,15 @@ test("hasError=true when tool_result content matches stderr-style error pattern"
   expect(bash!.hasError).toBe(true);
 });
 
+test("hasError=true via content pattern alone (no is_error flag)", async () => {
+  // Fixture has a single tool_result with content "exit code 127: command not found"
+  // and no is_error field — exercises the content-regex path in isolation.
+  const t = await parseTranscript(join(import.meta.dir, "fixtures/transcript-content-only-error.jsonl"));
+  const bash = t.tools.find((x) => x.name === "Bash");
+  expect(bash).toBeDefined();
+  expect(bash!.hasError).toBe(true);
+});
+
 test("hasError stays undefined for successful tool_result", async () => {
   const t = await parseTranscript(join(import.meta.dir, "fixtures/transcript-errors.jsonl"));
   const readTool = t.tools.find((x) => x.name === "Read");

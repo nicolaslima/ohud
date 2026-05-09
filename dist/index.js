@@ -666,12 +666,10 @@ function parseRaw(raw) {
         if (b.type === "tool_result" && typeof b.tool_use_id === "string") {
           const tool = tools.get(b.tool_use_id);
           if (tool) {
+            tool.status = "completed";
             tool.endTime = ts;
             if (b.is_error === true || isErrorContent(b.content)) {
-              tool.status = "error";
               tool.hasError = true;
-            } else {
-              tool.status = "completed";
             }
           }
           const agent = agents.get(b.tool_use_id);
