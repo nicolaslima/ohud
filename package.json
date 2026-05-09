@@ -11,7 +11,7 @@
     ".claude-plugin/"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --target=node --outfile=dist/index.js",
+    "build": "bun build src/index.ts --target=node --outfile=dist/index.js --banner='#!/usr/bin/env node' && chmod +x dist/index.js",
     "test": "bun test",
     "test:update": "bun test --update-snapshots",
     "typecheck": "tsc --noEmit",
