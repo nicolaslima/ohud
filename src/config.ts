@@ -38,6 +38,8 @@ export const DEFAULT_CONFIG: HudConfig = {
     showMemoryUsage: false,
     showEffortLevel: true,
     glyphs: "auto",
+    layout: "row",
+    hush: { compactWhenIdle: true, hyperlinks: true, animate: true },
   },
   gitStatus: {
     enabled: true,

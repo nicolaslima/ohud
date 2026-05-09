@@ -224,7 +224,9 @@ var DEFAULT_CONFIG = {
     showSpeed: false,
     showMemoryUsage: false,
     showEffortLevel: true,
-    glyphs: "auto"
+    glyphs: "auto",
+    layout: "row",
+    hush: { compactWhenIdle: true, hyperlinks: true, animate: true }
   },
   gitStatus: {
     enabled: true,
@@ -284,6 +286,16 @@ async function loadConfig(path) {
   return deepMerge(base, parsed);
 }
 
+// src/mode.ts
+function resolveMode(stdin, probe) {
+  const id = stdin.model?.id?.toLowerCase() ?? "";
+  if (id.startsWith("claude-"))
+    return "anthropic";
+  if (id.length > 0)
+    return "ollama";
+  return probe.daemonOk ? "ollama" : "anthropic";
+}
+
 // src/doctor.ts
 var CONSUMED_FLAGS = new Set([
   "showModel",
@@ -310,6 +322,8 @@ var CONSUMED_FLAGS = new Set([
   "showMemoryUsage",
   "showEffortLevel",
   "glyphs",
+  "layout",
+  "hush",
   "showAheadBehind",
   "pushWarningThreshold",
   "pushCriticalThreshold"
@@ -332,6 +346,16 @@ async function runDoctor(opts) {
   lines.push(`probe: live (cache bypassed) — daemonOk: ${probe.daemonOk ? "yes" : "no"}`);
   lines.push(`cloud models: ${probe.cloudModels.map((m) => m.name).join(", ") || "(none)"}`);
   lines.push(`mode: ${probe.daemonOk && probe.cloudModels.length > 0 ? "ollama-capable" : "anthropic"}`);
+  const activeLayout = cfg.display.layout ?? "row";
+  lines.push(`Active layout: ${activeLayout}`);
+  const dummyStdin = {};
+  const resolvedMode = resolveMode(dummyStdin, probe);
+  const modelId = dummyStdin.model?.id ?? "(none)";
+  lines.push(`Mode resolution: model.id=${modelId} → ${resolvedMode}`);
+  if (activeLayout === "hush") {
+    const h = cfg.display.hush ?? {};
+    lines.push(`Hush config: compactWhenIdle=${h.compactWhenIdle ?? true}, hyperlinks=${h.hyperlinks ?? true}, animate=${h.animate ?? true}`);
+  }
   lines.push(`
 active config flags (consumed?):`);
   lines.push(renderFlagAnnotations(cfg));
@@ -379,21 +403,6 @@ function readPackageJson() {
   } catch {
     return { version: "unknown" };
   }
-}
-
-// src/mode.ts
-function resolveMode(stdin, probe) {
-  if (!probe.daemonOk)
-    return "anthropic";
-  const candidates = [stdin.model?.id, stdin.model?.display_name].filter((v) => typeof v === "string" && v.length > 0);
-  if (candidates.length === 0)
-    return "anthropic";
-  if (candidates.some((c) => c.endsWith(":cloud")))
-    return "ollama";
-  if (probe.cloudModels.length === 0)
-    return "anthropic";
-  const cloudNames = new Set(probe.cloudModels.flatMap((m) => [m.name, m.model]));
-  return candidates.some((c) => cloudNames.has(c)) ? "ollama" : "anthropic";
 }
 
 // src/transcript.ts
@@ -2092,8 +2101,7 @@ var hushLayout = {
     const lines = [];
     if (line1)
       lines.push(truncateLine(line1, termWidth));
-    const compact = config.display.hush?.compactWhenIdle;
-    const compactWhenIdle = compact !== false;
+    const compactWhenIdle = config.display.hush?.compactWhenIdle !== false;
     if (compactWhenIdle) {
       if (line2)
         lines.push(truncateLine(line2, termWidth));
@@ -2113,13 +2121,20 @@ var LAYOUTS = {
 // src/render/index.ts
 function render(ctx) {
   const widgets = visibleWidgets(ctx.config);
-  const layoutName = "row";
-  const layout = LAYOUTS[layoutName];
+  const layoutName = ctx.config.display.layout ?? "row";
+  const layout = LAYOUTS[layoutName] ?? LAYOUTS.row;
   const termWidth = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
-  const cells = widgets.map((w) => {
+  const cells = widgets.flatMap((w) => {
+    if (layoutName === "hush" && w.renderHush) {
+      const c2 = w.renderHush(ctx);
+      if (!c2)
+        return [];
+      const arr = Array.isArray(c2) ? c2 : [c2];
+      return arr.map((cell) => ({ ...cell, id: w.id, group: w.group }));
+    }
     const c = w.render(ctx);
-    return c ? { ...c, id: w.id, group: w.group } : null;
-  }).filter((c) => c !== null);
+    return c ? [{ ...c, id: w.id, group: w.group }] : [];
+  });
   const outputLines = layout.pack(cells, termWidth, ctx.config);
   if (outputLines.length === 0 || outputLines.every((l) => l.trim() === "")) {
     return color(ctx.config.colors.label, "ohud");

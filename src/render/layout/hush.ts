@@ -157,9 +157,7 @@ export const hushLayout: Layout = {
 
     // compactWhenIdle: if no activity, omit line 2 (default true)
     // When compactWhenIdle is explicitly false, always emit line 2.
-    const compact = (config as HudConfig & { display: { hush?: { compactWhenIdle?: boolean } } })
-      .display.hush?.compactWhenIdle;
-    const compactWhenIdle = compact !== false; // default true
+    const compactWhenIdle = config.display.hush?.compactWhenIdle !== false; // default true
 
     if (compactWhenIdle) {
       if (line2) lines.push(truncateLine(line2, termWidth));

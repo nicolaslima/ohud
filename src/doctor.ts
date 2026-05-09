@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { probeOllama } from "./ollama-probe.js";
 import { loadConfig } from "./config.js";
-import type { HudConfig } from "./types.js";
+import { resolveMode } from "./mode.js";
+import type { HudConfig, StdinData } from "./types.js";
 
 // CONSUMED_FLAGS: flags actually read by render or orchestrator code.
 // Maintenance: regenerate by running:
@@ -20,6 +21,7 @@ const CONSUMED_FLAGS = new Set([
   "externalUsagePath", "externalUsageFreshnessMs", "showCost", "showPromptCache",
   "promptCacheTtlSeconds", "showTools", "showAgents", "showTodos", "showConfigCounts",
   "showDuration", "showSpeed", "showMemoryUsage", "showEffortLevel", "glyphs",
+  "layout", "hush",
   // GitStatus flags read by render/lines/project.ts
   "showAheadBehind", "pushWarningThreshold", "pushCriticalThreshold",
 ]);
@@ -50,6 +52,24 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
   lines.push(`probe: live (cache bypassed) — daemonOk: ${probe.daemonOk ? "yes" : "no"}`);
   lines.push(`cloud models: ${probe.cloudModels.map((m) => m.name).join(", ") || "(none)"}`);
   lines.push(`mode: ${(probe.daemonOk && probe.cloudModels.length > 0) ? "ollama-capable" : "anthropic"}`);
+
+  // Task C additions: active layout and mode resolution transparency
+  const activeLayout = cfg.display.layout ?? "row";
+  lines.push(`Active layout: ${activeLayout}`);
+
+  // Show model.id-driven mode resolution using a representative empty stdin
+  const dummyStdin: StdinData = {};
+  const resolvedMode = resolveMode(dummyStdin, probe);
+  const modelId = dummyStdin.model?.id ?? "(none)";
+  lines.push(`Mode resolution: model.id=${modelId} → ${resolvedMode}`);
+
+  // Hush config summary when active layout is hush
+  if (activeLayout === "hush") {
+    const h = cfg.display.hush ?? {};
+    lines.push(
+      `Hush config: compactWhenIdle=${h.compactWhenIdle ?? true}, hyperlinks=${h.hyperlinks ?? true}, animate=${h.animate ?? true}`,
+    );
+  }
 
   lines.push(`\nactive config flags (consumed?):`);
   lines.push(renderFlagAnnotations(cfg));

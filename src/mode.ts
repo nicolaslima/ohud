@@ -1,20 +1,33 @@
 // src/mode.ts
+//
+// Mode detection: determine whether the active session is "ollama" or "anthropic".
+//
+// R2 research finding: Ollama exposes an Anthropic-compatible /v1/messages endpoint,
+// which breaks the previous daemon-probe-based heuristic. When a user routes Anthropic
+// SDK calls through Ollama, the daemon IS running (daemonOk=true) but the model ID
+// begins with "claude-", making the old probe-first logic incorrectly classify the
+// session as "ollama".
+//
+// New rule (Task C): model.id is authoritative.
+//   1. If model.id starts with "claude-" (case-insensitive) → "anthropic".
+//   2. If model.id is non-empty and does NOT start with "claude-" → "ollama".
+//   3. Fallback (model.id absent or empty): use daemon-probe result as before
+//      — daemonOk=true → "ollama", daemonOk=false → "anthropic".
+//
+// This preserves the daemon-probe fallback for legacy/test scenarios that do not
+// supply a model.id (e.g. empty stdin, old Claude Code versions).
+
 import type { OllamaProbeResult, RenderMode, StdinData } from "./types.js";
 
 export function resolveMode(stdin: StdinData, probe: OllamaProbeResult): RenderMode {
-  if (!probe.daemonOk) return "anthropic";
+  const id = stdin.model?.id?.toLowerCase() ?? "";
 
-  const candidates = [stdin.model?.id, stdin.model?.display_name].filter(
-    (v): v is string => typeof v === "string" && v.length > 0,
-  );
-  if (candidates.length === 0) return "anthropic";
+  // Rule 1: claude-* prefix is definitively Anthropic, regardless of daemon state.
+  if (id.startsWith("claude-")) return "anthropic";
 
-  // Strong heuristic: explicit :cloud suffix wins regardless of cloudModels list
-  if (candidates.some((c) => c.endsWith(":cloud"))) return "ollama";
+  // Rule 2: any other non-empty model id is an Ollama model.
+  if (id.length > 0) return "ollama";
 
-  if (probe.cloudModels.length === 0) return "anthropic";
-
-  // Fallback: exact match against probe-listed names (case-sensitive)
-  const cloudNames = new Set(probe.cloudModels.flatMap((m) => [m.name, m.model]));
-  return candidates.some((c) => cloudNames.has(c)) ? "ollama" : "anthropic";
+  // Rule 3 (fallback): model.id absent — fall back to daemon-probe result.
+  return probe.daemonOk ? "ollama" : "anthropic";
 }

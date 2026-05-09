@@ -9,20 +9,26 @@ import { detectTerminalWidth } from "./width.js";
 export function render(ctx: RenderContext): string {
   const widgets = visibleWidgets(ctx.config);
 
-  // Task A: only RowLayout exists. Task B will wire "hush" properly.
-  // Cast to avoid referencing the layout config field which doesn't exist yet
-  // in HudConfig (added in Task C). Fallback to "row" always for now.
-  const layoutName = "row" as const;
-  const layout = LAYOUTS[layoutName];
+  // Read layout dynamically from config (added in Task C). Falls back to "row"
+  // for any config file that pre-dates Task C or omits display.layout.
+  const layoutName = ctx.config.display.layout ?? "row";
+  const layout = LAYOUTS[layoutName] ?? LAYOUTS.row;
   const termWidth = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
 
-  // Render each widget to a cell. WidgetCells for RowLayout (Task A only uses render()).
+  // Render each widget to cells, choosing hush render path when appropriate.
+  // renderHush() may return a HushCell array (e.g. project emits name+branch+model
+  // as separate sub-cells). Flatten all results into a single cells array.
   const cells = widgets
-    .map((w): WidgetCell | HushCell | null => {
+    .flatMap((w): (WidgetCell | HushCell)[] => {
+      if (layoutName === "hush" && w.renderHush) {
+        const c = w.renderHush(ctx);
+        if (!c) return [];
+        const arr = Array.isArray(c) ? c : [c];
+        return arr.map((cell) => ({ ...cell, id: w.id, group: w.group }));
+      }
       const c = w.render(ctx);
-      return c ? { ...c, id: w.id, group: w.group } : null;
-    })
-    .filter((c): c is WidgetCell | HushCell => c !== null);
+      return c ? [{ ...c, id: w.id, group: w.group }] : [];
+    });
 
   const outputLines = layout.pack(cells, termWidth, ctx.config);
 
