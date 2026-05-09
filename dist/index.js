@@ -176,6 +176,7 @@ async function probeOllama(opts) {
 import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join2 } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // src/config.ts
 import { readFile } from "node:fs/promises";
@@ -362,7 +363,11 @@ function resolveBundlePath() {
   const root = process.env.CLAUDE_PLUGIN_ROOT;
   if (root)
     return join2(root, "dist", "index.js");
-  return join2(homedir(), ".claude/plugins/cache/owner/ohud/dist/index.js");
+  try {
+    return fileURLToPath(import.meta.url);
+  } catch {
+    return join2(homedir(), ".claude/plugins/cache/ohud/ohud/0.1.0/dist/index.js");
+  }
 }
 function readPackageJson() {
   try {

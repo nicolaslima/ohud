@@ -2,6 +2,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { probeOllama } from "./ollama-probe.js";
 import { loadConfig } from "./config.js";
 import type { HudConfig } from "./types.js";
@@ -79,7 +80,11 @@ function renderFlagAnnotations(cfg: HudConfig): string {
 function resolveBundlePath(): string {
   const root = process.env.CLAUDE_PLUGIN_ROOT;
   if (root) return join(root, "dist", "index.js");
-  return join(homedir(), ".claude/plugins/cache/owner/ohud/dist/index.js");
+  try {
+    return fileURLToPath(import.meta.url);
+  } catch {
+    return join(homedir(), ".claude/plugins/cache/ohud/ohud/0.1.0/dist/index.js");
+  }
 }
 
 function readPackageJson(): { version: string } {
