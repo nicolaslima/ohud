@@ -55,3 +55,10 @@ Ollama's Anthropic-compatible layer (`/v1/messages`) translates cloud model resp
 - **Task 7 (transcript.ts):** implement the fallback path as the primary (and only) path: sum `cost.total_api_duration_ms` from `stdin`; do NOT walk transcript for `total_duration`. The transcript walk for timing fields can be omitted entirely.
 - **Task 19 (gpu-time.ts):** label must be `API ⏱` (not `GPU ⏱`), since we are measuring wall-clock API time, not GPU compute time. This is a user-visible change from the original spec.
 - **Task 28 (duration.ts) + tok/s:** `eval_count`/`eval_duration` did not survive the translation. `showSpeed` cannot be computed from transcript data in v0.1. The tok/s line renders nothing (hidden) for Ollama Cloud sessions unless a future Ollama API surfaces per-response timing.
+
+## Hypothesis 2 — `stdin.model.id` shape for `:cloud` sessions
+
+**Run date**: 2026-05-09
+**Method**: walked `~/.claude/projects/` JSONL transcripts via `scripts/verify-stdin-model-id.ts`, captured all distinct strings appearing as `model` fields.
+**Result**: no `:cloud` strings observed in available transcripts. The distinct model strings found were: `<synthetic>`, `claude-haiku-4-5-20251001`, `claude-opus-4-7`, `claude-sonnet-4-6`, `deepseek-v4-flash`, `deepseek-v4-pro`, `gemma4:31b`, `glm-4.7`, `glm-5`, `glm-5.1`, `gpt_image_2`, `haiku`, `imagegen_2_0`, `kimi-k2.5`, `kimi-k2.6`, `minimax-m2.5`, `minimax-m2.7`, `nano_banana_2`, `nemotron-3-super`, `opus`, `qwen3-coder-next`, `qwen3.5`, `sonnet`, `videotape-alpha`. Notably, Ollama Cloud model names appear without the `:cloud` tag suffix in transcripts (e.g. `kimi-k2.6` not `kimi-k2.6:cloud`), suggesting the `:cloud` tag is stripped before the string reaches the JSONL `model` field.
+**Decision**: heuristic `endsWith(":cloud")` is sufficient as positive signal for ollama mode regardless of probe.cloudModels alignment. Captured strings match the heuristic where present. The absence of `:cloud`-suffixed strings in transcripts means `stdin.model.id` (from the live stdin data sent to the HUD, not transcript) may still carry the suffix — the heuristic is retained as a forward-compatible guard.
