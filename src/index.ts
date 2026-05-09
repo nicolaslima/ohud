@@ -40,18 +40,17 @@ export async function main(): Promise<void> {
     const config = await loadConfig(CONFIG_PATH);
     const sessionId = stdin.session_id ?? "default";
 
-    const probe = await probeOllama({
-      host: config.ollama.host,
-      sessionId,
-      ttlSeconds: config.ollama.probeCacheTtlSeconds,
-      timeoutMs: config.ollama.probeTimeoutMs,
-    });
-    const mode = resolveMode(stdin, probe);
-
-    const [transcript, gitStatus] = await Promise.all([
+    const [probe, transcript, gitStatus] = await Promise.all([
+      probeOllama({
+        host: config.ollama.host,
+        sessionId,
+        ttlSeconds: config.ollama.probeCacheTtlSeconds,
+        timeoutMs: config.ollama.probeTimeoutMs,
+      }),
       parseTranscript(stdin.transcript_path ?? ""),
       config.gitStatus.enabled ? getGitStatus(stdin.workspace?.current_dir ?? stdin.cwd) : Promise.resolve(null),
     ]);
+    const mode = resolveMode(stdin, probe);
 
     let usageData = null;
     let costData = null;

@@ -50,14 +50,17 @@ export async function probeOllama(opts: ProbeOptions): Promise<OllamaProbeResult
   const cached = readCache(cachePath, ttlMs);
   if (cached) return cached;
 
-  const versionRes = await fetchWithTimeout(`${opts.host}/api/version`, opts.timeoutMs, fetchImpl);
+  const [versionRes, tagsRes] = await Promise.all([
+    fetchWithTimeout(`${opts.host}/api/version`, opts.timeoutMs, fetchImpl),
+    fetchWithTimeout(`${opts.host}/api/tags`, opts.timeoutMs, fetchImpl),
+  ]);
+
   if (!versionRes || !versionRes.ok) {
     const result: OllamaProbeResult = { daemonOk: false, cloudModels: [], fetchedAt: Date.now() };
     writeCache(cachePath, result);
     return result;
   }
 
-  const tagsRes = await fetchWithTimeout(`${opts.host}/api/tags`, opts.timeoutMs, fetchImpl);
   if (!tagsRes || !tagsRes.ok) {
     const result: OllamaProbeResult = { daemonOk: true, cloudModels: [], fetchedAt: Date.now() };
     writeCache(cachePath, result);
