@@ -13,6 +13,7 @@ import { renderTodos } from "./lines/todos.js";
 import { renderEnvironment } from "./lines/environment.js";
 import { renderMemory } from "./lines/memory.js";
 import { renderDuration } from "./lines/duration.js";
+import { detectTerminalWidth, truncateLine } from "./width.js";
 
 type LineFn = (ctx: RenderContext) => string | null;
 
@@ -56,7 +57,9 @@ export function render(ctx: RenderContext): string {
     rendered.add(key);
   }
 
-  return lines.join("\n");
+  const max = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
+  const truncated = lines.map((l) => truncateLine(l, max));
+  return truncated.join("\n");
 }
 
 function collectMerged(ctx: RenderContext): string | null {
