@@ -36,13 +36,17 @@ If invoked with an unknown argument (e.g., `/ohud foo`), responds:
 
 ---
 
-## `/ohud setup` (optional)
+## `/ohud setup` (required after install)
 
 **File**: `commands/ohud-setup.md`
 
-**Status**: optional in v0.1.
+**Status**: **required** in v0.1.x — not optional.
 
-ohud activates automatically via `plugin.json:statusLine` after `/plugin install ohud`. This command exists for users who want to **wrap the runtime** — e.g., for development with hot-reload:
+> **Why required?** Claude Code does not currently honor `plugin.json:statusLine` declarations. `/plugin install` registers slash commands but never activates the statusline. `/ohud setup` is what writes the actual binding to `~/.claude/settings.json`. Without running it, slash commands work but **the statusline never appears** — the most confusing failure mode in v0.1.
+>
+> See [explanation/design-decisions.md](../explanation/design-decisions.md#claude_plugin_root-in-pluginjson--aspirational-not-active) for the empirical investigation.
+
+This command also handles the dev-loop case — wrapping the runtime for hot-reload:
 
 ```bash
 "command": "bun --hot $PLUGIN_PATH"
@@ -74,13 +78,15 @@ sequenceDiagram
 
 ### When to use
 
+- **Always after `/plugin install ohud`** — the statusline does not activate without this step in v0.1.x.
+- Re-run after `/plugin update ohud` if the cache path changed.
 - Development: wrap with `bun --hot` for live reload.
 - Custom runtime: use a non-default Node version or shim wrapper.
 - Re-detect after manual cache directory move.
 
 ### When NOT to use
 
-- Fresh install. The manifest declaration is the right path. No setup needed.
+- You've already run it for this version of ohud and the statusline is working. Re-running is harmless but unnecessary.
 
 ---
 

@@ -151,7 +151,8 @@ Each line renderer receives this `ctx` and decides what to emit (or `null` to sk
 ```mermaid
 stateDiagram-v2
     [*] --> Installed: /plugin install ohud
-    Installed --> Activated: Claude Code reads<br/>plugin.json:statusLine
+    Installed --> SetupRun: /ohud setup<br/>(writes settings.json:statusLine)
+    SetupRun --> Activated: Claude Code restart
     Activated --> Rendering: every ~300 ms
     Rendering --> Rendering: tick
     Rendering --> Diagnosing: /ohud doctor
@@ -161,17 +162,19 @@ stateDiagram-v2
     Rendering --> [*]: Claude Code closes
 ```
 
-The critical edge is **Installed → Activated**. In v0.1, this is fully automatic because `plugin.json` declares:
+The critical edge is **Installed → SetupRun → Activated**. The `/plugin install` step alone is **not enough** — Claude Code does not currently honor `plugin.json:statusLine`. The actual binding is in `~/.claude/settings.json`:
 
 ```json
 "statusLine": {
   "type": "command",
-  "command": "${CLAUDE_PLUGIN_ROOT}/dist/index.js",
+  "command": "bash -c '... resolve cache path ... exec node $bundle'",
   "padding": 2
 }
 ```
 
-Pre-v0.1, this required a manual `/ohud setup` step that wrote an absolute path into `~/.claude/settings.json`. That path rotted on plugin update or uninstall — see [design-decisions.md](design-decisions.md) for the why.
+Written by `/ohud setup`. The wrapper resolves the cache path dynamically at every spawn, so `/plugin update` doesn't break the binding (unlike a hardcoded absolute path).
+
+`plugin.json` still declares `statusLine` aspirationally — if Claude Code adds support for that mechanism, ohud activates automatically without `/ohud setup`. Today (v0.1.x), `/ohud setup` is required. See [design-decisions.md](design-decisions.md#claude_plugin_root-in-pluginjson--aspirational-not-active) for the empirical investigation.
 
 ## Output contract
 

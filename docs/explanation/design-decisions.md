@@ -26,40 +26,44 @@ For v0.1, all of that complexity was deferred. The spawn-per-tick model has the 
 
 **Trade-off:** Cold-start is unavoidable. ohud measured it (76.9 ms median) and accepted it as a fixed cost.
 
-## `${CLAUDE_PLUGIN_ROOT}` in `plugin.json` instead of `/ohud setup`
+## `${CLAUDE_PLUGIN_ROOT}` in `plugin.json` — aspirational, not active
 
-Pre-v0.1, ohud required users to run `/ohud setup` after install. That wizard wrote an absolute path into `~/.claude/settings.json`:
+> ⚠️ **Updated post-install testing**: The original v0.1 design assumed Claude Code reads `plugin.json:statusLine` and resolves `${CLAUDE_PLUGIN_ROOT}` at render time. **In practice, Claude Code does not yet honor `plugin.json:statusLine` declarations.** Empirical testing showed that:
+>
+> - Slash commands declared in `plugin.json:commands[]` activate normally after `/plugin install`.
+> - But `plugin.json:statusLine` is silently ignored — Claude Code only reads `statusLine` from `~/.claude/settings.json`.
+>
+> No other plugin in the ecosystem (including `claude-hud`, the original inspiration) declares `statusLine` in `plugin.json`. They all use the `settings.json` path, written by their own setup wizard.
 
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "bun /Users/me/.claude/plugins/cache/owner/ohud/dist/index.js"
-  }
-}
-```
+### What this means in practice
 
-This had three failure modes:
+1. ohud's `plugin.json` still declares `statusLine` (forward-compatibility — if Claude Code adds support, ohud activates automatically).
+2. **Today, `/ohud setup` is a required install step**, not optional polish. It detects runtime and writes a working `statusLine` block to `settings.json`.
+3. Users who skip `/ohud setup` will see slash commands work (`/ohud doctor`, etc) but **the statusline never renders** — the most confusing failure mode possible.
 
-1. **Path rot on update**: `/plugin update ohud` could change the cache path. The settings.json absolute path would point at a deleted file. Statusline goes blank.
-2. **Path rot on uninstall**: `/plugin remove ohud` deletes the plugin files but leaves the settings.json block. Claude Code then tries to spawn a deleted file every tick.
-3. **State handoff with `/ohud configure`**: configure needs to know the runtime/path setup wrote. There was no shared state, so configure had to re-run detection or guess.
+### The original three failure modes (still apply to settings.json)
 
-The fix in v0.1 was to declare `statusLine` in `plugin.json` directly with `${CLAUDE_PLUGIN_ROOT}`:
+The design rationale for plugin.json was to avoid the failure modes of writing absolute paths to settings.json:
 
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "${CLAUDE_PLUGIN_ROOT}/dist/index.js",
-    "padding": 2
-  }
-}
-```
+1. **Path rot on update**: `/plugin update ohud` could change the cache path; the settings.json absolute path then points at a deleted file.
+2. **Path rot on uninstall**: `/plugin remove ohud` deletes the plugin files but leaves the settings.json block.
+3. **State handoff with `/ohud configure`**: configure needs to know runtime/path that setup chose.
 
-Claude Code resolves `${CLAUDE_PLUGIN_ROOT}` at render time. Plugin updates that change the cache path automatically resolve to the new path. Uninstall removes the manifest, so the statusLine vanishes too. **Five separate v0.1 review findings collapsed into this one fix.**
+These are real concerns. The current mitigation:
 
-`/ohud setup` still exists for users who want to wrap the runtime (e.g., `bun --hot` for development) but is now optional polish, not a required install step.
+- The `/ohud setup` wizard writes a `bash -c '...'` one-liner that **dynamically resolves** the cache path at every spawn (matches what `claude-hud` does). So `/plugin update` doesn't break it — the wrapper re-globs the cache directory each tick.
+- `state.json` (written by `/ohud setup`, read by `/ohud configure`) closes the handoff gap.
+- `/plugin remove ohud` still leaves a stale settings.json block. This is a known caveat documented in `/ohud doctor` output. v0.2 should add an `/ohud uninstall` command that cleans up.
+
+### v0.1.x → v0.2 path forward
+
+Two paths converge eventually:
+
+- **Short-term**: lean on `/ohud setup`. It's the reliable path. Document it as required.
+- **Medium-term**: file an issue with Claude Code requesting `plugin.json:statusLine` support. When supported, ohud's existing declaration "just works" and `/ohud setup` becomes truly optional (its original v0.1 promise).
+- **Long-term**: `plugin.json:statusLine` becomes the canonical mechanism; `/ohud setup` survives as a way to wrap the runtime (`bun --hot`, etc).
+
+The lesson: **empirical install matters**. Design decisions made on assumed platform behavior need to be smoke-tested in the real install path before being marketed as the default.
 
 ## Why `dist/` is committed to git
 

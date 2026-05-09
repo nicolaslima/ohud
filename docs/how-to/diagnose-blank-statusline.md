@@ -4,26 +4,54 @@
 
 ## Antes de começar
 
-Verifique uma coisa primeiro: a statusline aparece **uma vez por mensagem do agente**. Se você acabou de instalar e ainda não interagiu com Claude Code, ela não vai renderizar. Envie qualquer prompt e veja se aparece.
+Verifique duas coisas primeiro:
+
+1. **Você rodou `/ohud setup`?** Em v0.1.x, `/plugin install` registra slash commands mas **não ativa a statusline**. `/ohud setup` é o que escreve o binding em `~/.claude/settings.json`. Se as slash commands `/ohud doctor`/`/ohud configure` funcionam mas a statusline não aparece, este é provavelmente o caso. Veja [Passo 0](#passo-0-rodou-ohud-setup) abaixo.
+2. **Statusline aparece uma vez por mensagem do agente.** Se você acabou de instalar e ainda não mandou um prompt, ela não vai renderizar. Mande qualquer prompt antes de assumir que está quebrada.
 
 ## Fluxo de decisão
 
 ```mermaid
 flowchart TD
     start[Statusline ausente ou estranha]
-    start --> q1{ohud aparece em algum lugar?}
+    start --> q0{rodou /ohud setup?}
+    q0 -->|não / não tenho certeza| step0[Passo 0: rodar /ohud setup]
+    q0 -->|sim| q1{ohud aparece em algum lugar?}
     q1 -->|nada visível| step1[Passo 1: rodar /ohud doctor]
     q1 -->|aparece red 'ohud: error'| step2[Passo 2: ler last-errors.log]
     q1 -->|aparece literal 'ohud'| step3[Passo 3: tudo retornou null]
     q1 -->|aparece mas com modo errado| step4[Passo 4: verificar mode resolution]
     q1 -->|alguma linha falta| step5[Passo 5: flag está off?]
 
+    step0 --> action0[após setup + restart, volte ao fluxo]
     step1 --> action1[veja seção 'Passo 1' abaixo]
     step2 --> action2[veja seção 'Passo 2' abaixo]
     step3 --> action3[veja seção 'Passo 3' abaixo]
     step4 --> action4[veja seção 'Passo 4' abaixo]
     step5 --> action5[veja seção 'Passo 5' abaixo]
 ```
+
+---
+
+## Passo 0: Rodou `/ohud setup`?
+
+Em v0.1.x, este é o **failure mode #1 mais comum**.
+
+```
+/ohud setup
+```
+
+Se você acabou de instalar via `/plugin install ohud` e nunca rodou `/ohud setup`, faça isso agora. Veja [reference/slash-commands.md#ohud-setup-required-after-install](../reference/slash-commands.md#ohud-setup-required-after-install) para detalhes.
+
+**Como verificar se já rodou**:
+
+```bash
+jq '.statusLine.command' ~/.claude/settings.json
+```
+
+Se retorna `null` ou nada → **nunca rodou setup**. Rode agora e reinicie Claude Code.
+
+Se retorna uma string com `ohud` ou `dist/index.js` no path → setup já rodou. Continue para Passo 1.
 
 ---
 

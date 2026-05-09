@@ -43,7 +43,7 @@ curl -fsSL https://bun.sh/install | bash
 Dentro de uma sessão Claude Code:
 
 ```
-/plugin marketplace add nicolaslima/ohud-plugins
+/plugin marketplace add nicolaslima/ohud
 /plugin install ohud
 ```
 
@@ -54,11 +54,35 @@ Plugin "ohud" installed successfully.
 Reload Claude Code to activate.
 ```
 
-`★ O que aconteceu:` Claude Code clonou o repo no cache (`~/.claude/plugins/cache/...`), leu `.claude-plugin/plugin.json`, viu a declaração `statusLine` apontando para `${CLAUDE_PLUGIN_ROOT}/dist/index.js`. Próxima vez que você mandar uma mensagem, Claude Code vai spawnar esse bundle. Ver [explanation/architecture.md](../explanation/architecture.md) para o ciclo completo.
+`★ O que aconteceu:` Claude Code clonou o repo em `~/.claude/plugins/cache/...`, leu `.claude-plugin/plugin.json`, e registrou os 4 slash commands (`/ohud doctor`, etc). **Mas a statusline ainda não está ativa** — Claude Code não lê `statusLine` de `plugin.json` em v0.1.x. Próximo passo resolve isso. Ver [explanation/design-decisions.md](../explanation/design-decisions.md#claude_plugin_root-in-pluginjson--aspirational-not-active) para o porquê.
+
+## Passo 2 — Ativar a statusline com `/ohud setup`
+
+```
+/ohud setup
+```
+
+Esse comando:
+1. Detecta seu runtime (Node ou Bun) — testa `bun --version` primeiro, fallback `node --version`.
+2. Resolve o caminho absoluto do bundle do plugin.
+3. Escreve um bloco `statusLine` em `~/.claude/settings.json` apontando para o bundle.
+4. Verifica spawn enviando um stdin sintético.
+5. Persiste `state.json` para `/ohud configure` ler depois.
+
+Saída esperada:
+```
+Detected runtime: bun (or node)
+Plugin path: /Users/me/.claude/plugins/cache/ohud/ohud/0.1.0/dist/index.js
+Wrote statusLine to ~/.claude/settings.json
+Verification: OK (rendered 2 lines)
+Restart Claude Code.
+```
+
+`★ Por que esse passo é separado:` `/plugin install` registra commands mas **não** ativa statusLine. v0.1.x precisa de uma escrita explícita em `settings.json`. Setup é idempotente — pode rodar múltiplas vezes sem efeito colateral.
 
 Reinicie a sessão (`/exit` e reabra, ou Ctrl+D).
 
-## Passo 2 — Ver a primeira render
+## Passo 3 — Ver a primeira render
 
 Volte para Claude Code, mande qualquer prompt:
 
@@ -77,7 +101,7 @@ Se você vê isso → **funcionou**. Pule para o Passo 3.
 
 Se você vê só `ohud` (uma palavra solta) ou nada → ver [diagnose-blank-statusline.md](../how-to/diagnose-blank-statusline.md) e volte aqui.
 
-## Passo 3 — Inspecionar com `/ohud doctor`
+## Passo 4 — Inspecionar com `/ohud doctor`
 
 Doctor é seu amigo:
 
@@ -107,7 +131,7 @@ active config flags (consumed?):
 
 `★ O que olhar:` `mode:` confirma o que ohud detectou. Se você está usando Ollama mas vê `mode: anthropic`, ver [enable-ollama-cloud-mode.md](../how-to/enable-ollama-cloud-mode.md).
 
-## Passo 4 — Customizar via `/ohud configure`
+## Passo 5 — Customizar via `/ohud configure`
 
 Por padrão ohud mostra uma versão minimalista (model + path + git + context). Para ver mais linhas, use o wizard:
 
@@ -147,7 +171,7 @@ Reinicie Claude Code. Próxima statusline já reflete.
 
 `★ Bastidores:` `/ohud configure` lê `~/.claude/plugins/ohud/state.json` (escrito por `/ohud setup` se você rodou) para saber qual runtime + bundle path usar no preview. Se `state.json` não existe, cai em `$CLAUDE_PLUGIN_ROOT`. Ver [reference/slash-commands.md](../reference/slash-commands.md#ohud-configure).
 
-## Passo 5 — Ver as novas linhas
+## Passo 6 — Ver as novas linhas
 
 Mande outro prompt e veja:
 
@@ -160,7 +184,7 @@ Context ████░░░░░░ 12%
 
 3 linhas extras: tools (mostrando o que está rodando), todos (atual + progresso). Compare com o que você tinha no Passo 2.
 
-## Passo 6 — Personalizar cores
+## Passo 7 — Personalizar cores
 
 Edite `~/.claude/plugins/ohud/config.json`. Achar `colors`:
 
@@ -185,7 +209,7 @@ Salve. Mande outro prompt. A barra de Context agora é laranja.
 
 Para uma paleta inteira pré-fabricada, ver [customize-colors-and-glyphs.md](../how-to/customize-colors-and-glyphs.md) — tem receitas Solarized, Catppuccin e tema acessível.
 
-## Passo 7 — Entender o que cada linha consome
+## Passo 8 — Entender o que cada linha consome
 
 Curioso de onde vem cada número?
 
@@ -200,7 +224,7 @@ Curioso de onde vem cada número?
 
 Cada linha tem seu próprio módulo em `src/render/lines/`. Catálogo completo: [reference/line-modules.md](../reference/line-modules.md).
 
-## Passo 8 — Quebrar e consertar
+## Passo 9 — Quebrar e consertar
 
 Vamos provocar um failure de propósito para ver como ohud reage.
 
@@ -227,7 +251,7 @@ Tudo certo. Volte o config para `localhost:11434` (ou o que era antes) e siga em
 
 `★ Por que isso importa:` ohud é fail-soft por design. A blank statusline seria a pior UX (indistinguível de "ohud quebrou"). Em vez disso, ohud sempre emite *alguma* linha — mesmo que mínima. Ver [explanation/architecture.md](../explanation/architecture.md#failure-modes-and-observability).
 
-## Passo 9 — Medir o overhead
+## Passo 10 — Medir o overhead
 
 Rode com profiling:
 
@@ -241,7 +265,7 @@ ohud roda em ~76ms median (75% do budget de 300ms livre). Se você ver > 200ms c
 
 Para o método de medição completo, ver [explanation/300ms-budget.md](../explanation/300ms-budget.md).
 
-## Passo 10 — Você está pronto
+## Passo 11 — Você está pronto
 
 Você sabe agora:
 

@@ -22,14 +22,17 @@
 ## ⚡ 60-second install
 
 ```
-/plugin marketplace add nicolaslima/ohud-plugins
+/plugin marketplace add nicolaslima/ohud
 /plugin install ohud
+/ohud setup
 ```
 
-Restart Claude Code. The HUD appears below every assistant message. Done.
+Restart Claude Code. The HUD appears below every assistant message.
 
-> **Optional:** `/ohud configure` to pick a preset (Full / Essential / Minimal).
-> **Optional:** `/ohud doctor` if anything looks off.
+> **Why three commands and not two?** `/plugin install` registers slash commands (`/ohud doctor`, etc) but **does not** activate the statusline. `/ohud setup` detects your runtime (Node/Bun) and writes the actual statusline binding to `~/.claude/settings.json`. This is required because Claude Code does not yet honor `plugin.json:statusLine` declarations — see [docs/explanation/design-decisions.md](docs/explanation/design-decisions.md#claude_plugin_root-in-pluginjson--aspirational-not-active) for the full story.
+>
+> **Then:** `/ohud configure` to pick a preset (Full / Essential / Minimal).
+> `/ohud doctor` if anything looks off.
 
 ## 👀 What it looks like
 

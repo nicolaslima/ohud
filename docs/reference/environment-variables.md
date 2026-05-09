@@ -126,9 +126,9 @@ done
 
 ## CLAUDE_PLUGIN_ROOT
 
-Set by Claude Code when invoking the plugin's `statusLine.command`. Points at the plugin's installed cache directory.
+Set by Claude Code in slash command and (eventually) statusLine spawn contexts. Points at the plugin's installed cache directory (e.g., `~/.claude/plugins/cache/ohud/ohud/0.1.0`).
 
-**Used in:** `plugin.json:statusLine.command` (the manifest itself), `commands/ohud-doctor.md` (slash command body), `commands/ohud-configure.md` (preview command), `src/doctor.ts:resolveBundlePath`.
+**Used in:** `commands/ohud-doctor.md` (slash command body), `commands/ohud-configure.md` (preview command), `src/doctor.ts:resolveBundlePath`, and aspirationally in `plugin.json:statusLine.command` (which Claude Code does not yet read — see [explanation/design-decisions.md](../explanation/design-decisions.md#claude_plugin_root-in-pluginjson--aspirational-not-active)).
 
 You normally never set this yourself. ohud's code uses it like:
 
