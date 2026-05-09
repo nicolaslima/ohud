@@ -15,27 +15,34 @@ cat "$CFG"
 
 ## Step 2: Pick a preset
 
-Use AskUserQuestion to ask:
+Use AskUserQuestion to ask the user to choose:
 
-- **Full** — everything enabled (tools, agents, todos, cost, duration, memory, environment)
-- **Essential** — tools + todos + git, no cost/memory
-- **Minimal** — model, project, git, context bar only
-- **Custom** — keep going to fine-grained toggles
+- **Full** — everything Pilha A enables: showCost: true, showPromptCache: true, showTools: true, showAgents: true, showTodos: true, showDuration: true, showSpeed: true, showMemoryUsage: true, showEffortLevel: true, gitStatus.showAheadBehind: true, lineLayout: "expanded"
+- **Essential** — showTools: true, showTodos: true, showCost: false, showAgents: false, showMemoryUsage: false, showEffortLevel: true, gitStatus.showAheadBehind: true, lineLayout: "expanded"
+- **Minimal** — all show* flags false EXCEPT: showModel: true, showContextBar: true, showApiTime: true, showUsage: true, showEffortLevel: true, gitStatus.showAheadBehind: false, lineLayout: "expanded"
+- **Custom** — keep current config; ask per-flag follow-up
 
 ## Step 3: Apply preset
 
-Write the corresponding `display.show*` flags to the config file via Edit. Always preserve `colors.*`, `pathLevels`, `maxWidth`, `display.timeFormat`, `display.promptCacheTtlSeconds` — these are advanced and stay user-managed.
+Use the Edit tool to merge the preset's flag mapping into `~/.claude/plugins/ohud/config.json`. Always preserve `colors.*`, `pathLevels`, `maxWidth`, `display.timeFormat`, `display.promptCacheTtlSeconds`, `display.sevenDayThreshold`, `display.externalUsagePath`, `ollama.host` — these are advanced and stay user-managed.
 
-## Step 4: Preview
+## Step 4: Preview against the most recent session
 
-Render a sample using a fake stdin payload:
+Find the latest transcript:
 
 ```bash
-echo '{"session_id":"preview","transcript_path":"/tmp/no","model":{"id":"glm-5:cloud","display_name":"glm-5:cloud"},"workspace":{"current_dir":"'"$PWD"'"},"context_window":{"used_percentage":42}}' \
-  | <RUNTIME> <PLUGIN_PATH>
+LATEST=$(ls -t ~/.claude/projects/*/$(ls -t ~/.claude/projects | head -1)/*.jsonl 2>/dev/null | head -1)
+test -n "$LATEST" && tail -1 "$LATEST" | jq -r 'select(.type == "summary" or .type == "user")' | head -1
 ```
 
-Show the output to the user. Ask if it looks right.
+Construct a real-shape stdin from the latest session and pipe to the bundle:
+
+```bash
+echo '{"session_id":"preview","transcript_path":"'"$LATEST"'","model":{"id":"glm-5:cloud","display_name":"glm-5:cloud"},"workspace":{"current_dir":"'"$PWD"'"},"context_window":{"used_percentage":42}}' \
+  | node "$CLAUDE_PLUGIN_ROOT/dist/index.js"
+```
+
+Show the rendered output to the user. The preview now reflects toggles that depend on transcript data (tools, todos, agents, prompt-cache) — not fake numbers.
 
 ## Step 5: Save and exit
 
