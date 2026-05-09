@@ -80,9 +80,10 @@ function deepMerge<T>(base: T, override: unknown): T {
 }
 
 export async function loadConfig(path: string): Promise<HudConfig> {
+  const base = structuredClone(DEFAULT_CONFIG);
   let raw: string;
-  try { raw = await readFile(path, "utf8"); } catch { return DEFAULT_CONFIG; }
+  try { raw = await readFile(path, "utf8"); } catch { return base; }
   let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { return DEFAULT_CONFIG; }
-  return deepMerge(DEFAULT_CONFIG, parsed);
+  try { parsed = JSON.parse(raw); } catch { return base; }
+  return deepMerge(base, parsed);
 }

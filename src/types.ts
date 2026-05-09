@@ -204,9 +204,9 @@ export interface HudConfig {
   lineLayout: "expanded" | "compact";
   pathLevels: 1 | 2 | 3;
   maxWidth: number | null;
-  elementOrder: string[];
+  elementOrder: readonly string[];
   display: {
-    mergeGroups: string[][];
+    mergeGroups: readonly (readonly string[])[];
     showModel: boolean;
     showContextBar: boolean;
     contextValue: "percent" | "tokens" | "remaining" | "both";
