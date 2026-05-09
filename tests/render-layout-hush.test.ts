@@ -139,15 +139,15 @@ describe("Idle state", () => {
     expect(plain).toContain("15%");
   });
 
-  test("cross-group separator is ' · ' (compact default, dim middle dot)", () => {
+  test("within-group separator is ' · ' (compact default, dim middle dot)", () => {
     const ctx = makeCtx({ stdin: { context_window: { used_percentage: 15 } } });
     const cells = collectCells([projectWidget, contextWidget], ctx);
     const [line1] = hushLayout.pack(cells, 200, ctx.config);
     const plain = stripAnsi(line1!);
-    // The middle dot signals group boundaries without consuming much space.
+    // Header sub-cells (project / branch / model) share the dim dot — group cohesion.
     expect(plain).toContain(" · ");
-    // Within-group cells (project sub-cells) still use single space — no excess padding.
-    expect(plain).not.toMatch(/   /);
+    // Cross-group boundary uses 3 spaces (no dot) — separation by absence.
+    expect(plain).toMatch(/   /);
   });
 });
 
@@ -890,25 +890,25 @@ describe("density separators", () => {
     ];
   }
 
-  test("compact density: same-group cells joined by 1 space", () => {
+  test("compact density: same-group cells joined by ' · ' (dim middle dot — cohesion)", () => {
     const ctx = makeCtx();
     ctx.config.display.hush = { density: "compact" };
     const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha Beta");
-  });
-
-  test("compact density: cross-group cells joined by ' · ' (dim middle dot)", () => {
-    const ctx = makeCtx();
-    ctx.config.display.hush = { density: "compact" };
-    const [line] = hushLayout.pack(makeTwoCells("header", "metrics"), 200, ctx.config);
     expect(stripAnsi(line!)).toBe("Alpha · Beta");
   });
 
-  test("compact density: cross-group dot wears dim SGR (\\x1b[2m...\\x1b[22m) when colors enabled", () => {
+  test("compact density: same-group dot wears dim SGR (\\x1b[2m...\\x1b[22m)", () => {
+    const ctx = makeCtx();
+    ctx.config.display.hush = { density: "compact" };
+    const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
+    expect(line!).toContain("\x1b[2m·\x1b[22m");
+  });
+
+  test("compact density: cross-group cells joined by 3 spaces (boundary by absence of dot)", () => {
     const ctx = makeCtx();
     ctx.config.display.hush = { density: "compact" };
     const [line] = hushLayout.pack(makeTwoCells("header", "metrics"), 200, ctx.config);
-    expect(line!).toContain("\x1b[2m·\x1b[22m");
+    expect(stripAnsi(line!)).toBe("Alpha   Beta");
   });
 
   test("comfortable density: same-group cells joined by ' · '", () => {
@@ -939,11 +939,11 @@ describe("density separators", () => {
     expect(stripAnsi(line!)).toBe("Alpha      Beta");
   });
 
-  test("default density (unset) behaves as compact", () => {
+  test("default density (unset) behaves as compact (dim dot within group)", () => {
     const ctx = makeCtx();
     ctx.config.display.hush = {};
     const [line] = hushLayout.pack(makeTwoCells("header", "header"), 200, ctx.config);
-    expect(stripAnsi(line!)).toBe("Alpha Beta");
+    expect(stripAnsi(line!)).toBe("Alpha · Beta");
   });
 
   test("project sub-cells (name + branch + model) all have header group → use WITHIN_SEP", () => {

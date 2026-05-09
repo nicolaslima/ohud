@@ -2201,7 +2201,7 @@ function resolveSeparators(density, env) {
     case "airy":
       return { within: "  ", between: "      " };
     default:
-      return { within: " ", between: ` ${dot} ` };
+      return { within: ` ${dot} `, between: "   " };
   }
 }
 function effectiveBaseColor(cell, toggles) {

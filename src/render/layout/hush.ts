@@ -94,12 +94,16 @@ interface Separators {
  * Build the 3-tier separator set for a density.
  *
  * The middle-dot `·` (U+00B7) wrapped in dim SGR is the visual signature of
- * Hush. It marks group boundaries without consuming much horizontal space and
- * respects terminal themes (no fixed color, just dim).
+ * Hush. It carries *cohesion* — cells of the same group share the dot —
+ * while group boundaries are marked by absence of dot plus extra spacing.
+ * This produces a readable "dot pattern, then break, then dot pattern" rhythm:
  *
- * - compact     : within=` ` (terse) ; between=` · ` (single dot, dim)
- * - comfortable : within=` · ` (dim) ; between=4 spaces (open grid)
- * - airy        : within=2 spaces    ; between=6 spaces (table-like)
+ *     ohud · develop · opus-4.7    22% of 1M    rate 52%/5h    cache 4m
+ *     └─────── header ───────┘  └ metrics ┘  └ metrics ┘  └ metrics ┘
+ *
+ * - compact     : within=` · ` ; between=`   ` (3 spaces) — terse
+ * - comfortable : within=` · ` ; between=`    ` (4 spaces) — balanced
+ * - airy        : within=`  `  ; between=`      ` (6 spaces) — gridless
  *
  * In NO_COLOR/dumb-term environments the dot stays but the dim wrap is
  * suppressed (still semantic, just full-bright).
@@ -113,7 +117,7 @@ function resolveSeparators(
   switch (density) {
     case "comfortable": return { within: ` ${dot} `, between: "    " };
     case "airy":        return { within: "  ",       between: "      " };
-    default:            return { within: " ",        between: ` ${dot} ` };  // compact
+    default:            return { within: ` ${dot} `, between: "   " };  // compact
   }
 }
 
