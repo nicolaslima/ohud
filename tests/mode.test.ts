@@ -7,6 +7,8 @@ const probeOk = (cloud: string[]): OllamaProbeResult => ({
   daemonOk: true,
   cloudModels: cloud.map((m) => ({ name: m, model: m, remote_host: "https://ollama.com:443" })),
   fetchedAt: Date.now(),
+  cloudModelsAt: Date.now(),
+  host: "http://localhost:11434",
 });
 
 test("ollama mode when daemon ok + model in cloud list", () => {
@@ -16,13 +18,13 @@ test("ollama mode when daemon ok + model in cloud list", () => {
 });
 
 test("anthropic mode when daemon offline", () => {
-  const probe: OllamaProbeResult = { daemonOk: false, cloudModels: [], fetchedAt: Date.now() };
+  const probe: OllamaProbeResult = { daemonOk: false, cloudModels: [], fetchedAt: Date.now(), cloudModelsAt: Date.now(), host: "http://localhost:11434" };
   const stdin: StdinData = { model: { id: "glm-5:cloud" } };
   expect(resolveMode(stdin, probe)).toBe("anthropic");
 });
 
 test("anthropic mode when no cloud models installed", () => {
-  const probe: OllamaProbeResult = { daemonOk: true, cloudModels: [], fetchedAt: Date.now() };
+  const probe: OllamaProbeResult = { daemonOk: true, cloudModels: [], fetchedAt: Date.now(), cloudModelsAt: Date.now(), host: "http://localhost:11434" };
   const stdin: StdinData = { model: { id: "glm-5:cloud" } };
   expect(resolveMode(stdin, probe)).toBe("anthropic");
 });

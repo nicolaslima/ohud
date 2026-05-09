@@ -44,7 +44,8 @@ export async function main(): Promise<void> {
       probeOllama({
         host: config.ollama.host,
         sessionId,
-        ttlSeconds: config.ollama.probeCacheTtlSeconds,
+        daemonTtlSeconds: config.ollama.daemonTtlSeconds,
+        cloudModelsTtlSeconds: config.ollama.cloudModelsTtlSeconds,
         timeoutMs: config.ollama.probeTimeoutMs,
       }),
       parseTranscript(stdin.transcript_path ?? ""),

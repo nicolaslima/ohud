@@ -42,7 +42,8 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
   const probe = await probeOllama({
     host: opts.host,
     sessionId: "doctor",
-    ttlSeconds: 0,
+    daemonTtlSeconds: 0,
+    cloudModelsTtlSeconds: 0,
     timeoutMs: 1500,
   });
   lines.push(`probe: live (cache bypassed) — daemonOk: ${probe.daemonOk ? "yes" : "no"}`);

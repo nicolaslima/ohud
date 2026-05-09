@@ -58,7 +58,8 @@ export const DEFAULT_CONFIG: HudConfig = {
   },
   ollama: {
     host: "http://localhost:11434",
-    probeCacheTtlSeconds: 60,
+    daemonTtlSeconds: 5,
+    cloudModelsTtlSeconds: 120,
     probeTimeoutMs: 500,
   },
 };

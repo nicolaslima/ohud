@@ -95,7 +95,9 @@ export interface OllamaTagsModel {
 export interface OllamaProbeResult {
   daemonOk: boolean;
   cloudModels: OllamaTagsModel[];   // only entries with remote_host populated
-  fetchedAt: number;                 // epoch ms
+  fetchedAt: number;                 // epoch ms — daemonOk freshness
+  cloudModelsAt: number;             // epoch ms — cloudModels freshness (may be older)
+  host: string;                      // host probed; cache invalid if mismatch on read
 }
 
 // === Transcript ===
@@ -251,7 +253,8 @@ export interface HudConfig {
   };
   ollama: {
     host: string;
-    probeCacheTtlSeconds: number;
+    daemonTtlSeconds: number;        // short — for liveness re-check
+    cloudModelsTtlSeconds: number;   // long — models change rarely
     probeTimeoutMs: number;
   };
 }
