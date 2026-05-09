@@ -882,426 +882,6 @@ function effortBlock(ctx) {
   return color(ctx.config.colors.label, `effort:${ctx.effortLevel}`);
 }
 
-// src/render/thresholds.ts
-function barColorForPercent(pct, palette, thresholds = { warning: 60, critical: 75 }) {
-  if (pct >= thresholds.critical)
-    return palette.critical;
-  if (pct >= thresholds.warning)
-    return palette.warning;
-  return palette.default;
-}
-
-// src/render/lines/context.ts
-var BAR_WIDTH = 10;
-function renderContext(ctx) {
-  if (!ctx.config.display.showContextBar)
-    return null;
-  const pct = ctx.stdin.context_window?.used_percentage;
-  if (typeof pct !== "number" || !Number.isFinite(pct))
-    return null;
-  const rounded = Math.round(pct);
-  const c = ctx.config.colors;
-  const barColor = barColorForPercent(rounded, {
-    default: c.context,
-    warning: c.warning,
-    critical: c.critical
-  }, {
-    warning: ctx.config.display.warningThreshold,
-    critical: ctx.config.display.criticalThreshold
-  });
-  const filled = Math.floor(rounded * BAR_WIDTH / 100);
-  const empty2 = BAR_WIDTH - filled;
-  const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(empty2);
-  const valuePart = formatValue(ctx, rounded);
-  return `${color(c.label, "Context")} ${color(barColor, bar)} ${color(barColor, valuePart)}`;
-}
-function formatValue(ctx, rounded) {
-  const cw = ctx.stdin.context_window;
-  const total = cw?.context_window_size ?? 0;
-  const used = cw?.total_input_tokens ?? 0;
-  const fmt = (n) => `${(n / 1000).toFixed(0)}k`;
-  switch (ctx.config.display.contextValue) {
-    case "tokens":
-      return `${fmt(used)}/${fmt(total)}`;
-    case "remaining":
-      return `${100 - rounded}%`;
-    case "both":
-      return `${rounded}% (${fmt(used)}/${fmt(total)})`;
-    default:
-      return `${rounded}%`;
-  }
-}
-
-// src/render/lines/api-time.ts
-function renderApiTime(ctx) {
-  if (ctx.mode !== "ollama")
-    return null;
-  if (!ctx.config.display.showApiTime)
-    return null;
-  const c = ctx.config.colors;
-  const apiMs = ctx.stdin.cost?.total_api_duration_ms;
-  if (typeof apiMs === "number" && apiMs > 0) {
-    return `${color(c.label, "API")} ${color(c.apiTime, `${glyph("clock", ctx.config.display.glyphs)} ${formatDuration(apiMs)}`)}`;
-  }
-  return null;
-}
-function formatDuration(ms) {
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor(totalSec % 3600 / 60);
-  const s = totalSec % 60;
-  if (h > 0)
-    return `${h}h ${m}m ${s}s`;
-  if (m > 0)
-    return `${m}m ${s}s`;
-  return `${s}s`;
-}
-
-// src/render/lines/usage.ts
-var BAR_WIDTH2 = 10;
-function renderUsage(ctx) {
-  if (ctx.mode !== "anthropic")
-    return null;
-  if (!ctx.config.display.showUsage)
-    return null;
-  if (!ctx.usageData)
-    return null;
-  const { fiveHour, sevenDay } = ctx.usageData;
-  const parts = [];
-  if (fiveHour !== null)
-    parts.push(formatWindow(ctx, "5h", fiveHour, ctx.usageData.fiveHourResetAt));
-  if (sevenDay !== null && sevenDay >= ctx.config.display.sevenDayThreshold) {
-    parts.push(formatWindow(ctx, "7d", sevenDay, ctx.usageData.sevenDayResetAt));
-  }
-  if (parts.length === 0)
-    return null;
-  const c = ctx.config.colors;
-  return `${color(c.label, "Usage")} ${parts.join(" | ")}`;
-}
-function formatWindow(ctx, label, pct, resetAt) {
-  const c = ctx.config.colors;
-  const lineColor = barColorForPercent(pct, {
-    default: c.usage,
-    warning: c.usageWarning,
-    critical: c.critical
-  }, {
-    warning: ctx.config.display.warningThreshold,
-    critical: ctx.config.display.criticalThreshold
-  });
-  let core;
-  if (ctx.config.display.usageBarEnabled && !ctx.config.display.usageCompact) {
-    const filled = Math.floor(pct * BAR_WIDTH2 / 100);
-    const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(BAR_WIDTH2 - filled);
-    core = `${color(lineColor, bar)} ${color(lineColor, `${pct}%`)} (${label})`;
-  } else {
-    core = color(lineColor, `${label}: ${pct}%`);
-  }
-  if (ctx.config.display.showResetLabel && resetAt) {
-    core += " " + color(c.label, formatReset(resetAt, ctx.config.display.timeFormat));
-  }
-  return core;
-}
-function formatReset(resetAt, fmt) {
-  const deltaMs = resetAt.getTime() - Date.now();
-  const rel = relativeTime(deltaMs);
-  if (fmt === "relative")
-    return `resets in ${rel}`;
-  const abs = resetAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (fmt === "absolute")
-    return `resets at ${abs}`;
-  return `resets in ${rel} (${abs})`;
-}
-function relativeTime(ms) {
-  if (ms <= 0)
-    return "now";
-  const min = Math.floor(ms / 60000);
-  if (min < 60)
-    return `~${min}m`;
-  const h = Math.floor(min / 60);
-  const remM = min % 60;
-  return remM > 0 ? `~${h}h${remM}m` : `~${h}h`;
-}
-
-// src/render/lines/cost.ts
-function renderCost(ctx) {
-  if (ctx.mode !== "anthropic")
-    return null;
-  if (!ctx.costData)
-    return null;
-  if (!ctx.config.display.showCost) {
-    if (ctx.costData.source !== "native" || ctx.costData.totalUsd <= 0)
-      return null;
-  }
-  const c = ctx.config.colors;
-  const suffix = ctx.costData.source === "estimate" ? color(c.label, " (est)") : "";
-  return `${color(c.label, "Cost")} ${color(c.label, formatUsd(ctx.costData.totalUsd))}${suffix}`;
-}
-
-// src/prompt-cache.ts
-function promptCacheRemainingMs(lastResponseAt, ttlSeconds, now = Date.now) {
-  if (!lastResponseAt)
-    return null;
-  const elapsedMs = now() - lastResponseAt.getTime();
-  const ttlMs = ttlSeconds * 1000;
-  return Math.max(0, ttlMs - elapsedMs);
-}
-function formatPromptCache(remainingMs) {
-  if (remainingMs === 0)
-    return "expired";
-  const seconds = Math.floor(remainingMs / 1000);
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return m === 0 ? `${s}s` : `${m}m ${s}s`;
-}
-
-// src/render/lines/prompt-cache.ts
-function renderPromptCache(ctx) {
-  if (ctx.mode !== "anthropic")
-    return null;
-  if (!ctx.config.display.showPromptCache)
-    return null;
-  const remaining = promptCacheRemainingMs(ctx.transcript.lastAssistantResponseAt, ctx.config.display.promptCacheTtlSeconds);
-  if (remaining === null)
-    return null;
-  const c = ctx.config.colors;
-  return `${color(c.label, "cache")} ${color(c.label, formatPromptCache(remaining))}`;
-}
-
-// src/render/lines/tools.ts
-function renderTools(ctx) {
-  if (!ctx.config.display.showTools)
-    return null;
-  const tools = ctx.transcript.tools;
-  if (tools.length === 0)
-    return null;
-  const running = tools.filter((t) => t.status === "running");
-  const completed = tools.filter((t) => t.status === "completed");
-  const c = ctx.config.colors;
-  const parts = [];
-  for (const g of groupRunning(running).values()) {
-    const targetSuffix = g.target ? `: ${basename(g.target)}` : "";
-    const countSuffix = g.count > 1 ? ` ×${g.count}` : "";
-    parts.push(`${color(c.label, glyph("running", ctx.config.display.glyphs))} ${g.name}${countSuffix}${targetSuffix}`);
-  }
-  const tally = countByName(completed);
-  for (const [name, count] of tally)
-    parts.push(`${color(c.label, glyph("done", ctx.config.display.glyphs))} ${name}${count > 1 ? ` ×${count}` : ""}`);
-  return parts.join(color(c.label, " | "));
-}
-function groupRunning(entries) {
-  const out = new Map;
-  for (const t of entries) {
-    const sameNameAny = [...out.values()].find((g) => g.name === t.name);
-    if (sameNameAny && sameNameAny.target !== t.target) {
-      sameNameAny.target = undefined;
-      sameNameAny.count += 1;
-      continue;
-    }
-    const key = `${t.name}\x00${t.target ?? ""}`;
-    const existing = out.get(key);
-    if (existing)
-      existing.count += 1;
-    else
-      out.set(key, { name: t.name, target: t.target, count: 1 });
-  }
-  return out;
-}
-function countByName(entries) {
-  const m = new Map;
-  for (const e of entries)
-    m.set(e.name, (m.get(e.name) ?? 0) + 1);
-  return m;
-}
-
-// src/render/lines/agents.ts
-function renderAgents(ctx) {
-  if (!ctx.config.display.showAgents)
-    return null;
-  const agents = ctx.transcript.agents;
-  if (agents.length === 0)
-    return null;
-  const c = ctx.config.colors;
-  const running = agents.filter((a) => a.status === "running");
-  const completed = agents.filter((a) => a.status === "completed");
-  const lines = [];
-  if (running.length === 1) {
-    lines.push(formatRunningAgent(running[0], ctx));
-  } else if (running.length >= 2) {
-    for (const a of running)
-      lines.push(formatRunningAgent(a, ctx));
-  }
-  if (completed.length > 0) {
-    const tally = countByType(completed);
-    const completedParts = [];
-    for (const [type, count] of tally) {
-      completedParts.push(`${color(c.label, glyph("done", ctx.config.display.glyphs))} ${type}${count > 1 ? ` ×${count}` : ""}`);
-    }
-    lines.push(completedParts.join(color(c.label, " | ")));
-  }
-  return lines.length > 0 ? lines.join(`
-`) : null;
-}
-function formatRunningAgent(a, ctx) {
-  const c = ctx.config.colors;
-  const sym = glyph("running", ctx.config.display.glyphs);
-  const modelTag = a.model ? ` [${a.model}]` : "";
-  const desc = a.description ? `: ${a.description}` : "";
-  const elapsed = a.endTime ? "" : ` (${formatElapsed(a.startTime)})`;
-  return `${color(c.label, sym)} ${a.type}${modelTag}${desc}${color(c.label, elapsed)}`;
-}
-function countByType(entries) {
-  const m = new Map;
-  for (const e of entries)
-    m.set(e.type, (m.get(e.type) ?? 0) + 1);
-  return m;
-}
-function formatElapsed(start) {
-  const sec = Math.floor((Date.now() - start.getTime()) / 1000);
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
-
-// src/render/lines/todos.ts
-function renderTodos(ctx) {
-  if (!ctx.config.display.showTodos)
-    return null;
-  const todos = ctx.transcript.todos;
-  if (todos.length === 0)
-    return null;
-  const total = todos.length;
-  const completed = todos.filter((t) => t.status === "completed").length;
-  const inProgress = todos.find((t) => t.status === "in_progress");
-  const c = ctx.config.colors;
-  const head = inProgress ? `${color(c.label, glyph("active", ctx.config.display.glyphs))} ${inProgress.content}` : `${color(c.label, glyph("todo", ctx.config.display.glyphs))} no active todo`;
-  return `${head} ${color(c.label, `(${completed}/${total})`)}`;
-}
-
-// src/render/lines/environment.ts
-import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
-import { dirname, join as join3 } from "node:path";
-import { homedir as homedir2 } from "node:os";
-function renderEnvironment(ctx) {
-  if (!ctx.config.display.showConfigCounts)
-    return null;
-  const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd;
-  if (!dir)
-    return null;
-  const counts = countAll(dir);
-  const c = ctx.config.colors;
-  const parts = [
-    `${counts.claudeMd} CLAUDE.md`,
-    `${counts.rules} rules`,
-    `${counts.mcps} MCPs`,
-    `${counts.hooks} hooks`
-  ];
-  return color(c.label, parts.join(" | "));
-}
-function countAll(startDir) {
-  const home = homedir2();
-  let claudeMd = 0;
-  let dir = startDir;
-  while (dir && dir.length > 1 && dir.startsWith(home)) {
-    if (existsSync3(join3(dir, "CLAUDE.md")))
-      claudeMd += 1;
-    const parent = dirname(dir);
-    if (parent === dir)
-      break;
-    dir = parent;
-  }
-  const settings = readSettings(join3(home, ".claude/settings.json"));
-  const mcps = Object.keys(settings?.mcpServers ?? {}).length;
-  const hooks = countHooks(settings?.hooks);
-  const rules = readRules(startDir);
-  return { claudeMd, rules, mcps, hooks };
-}
-function readSettings(path) {
-  try {
-    return JSON.parse(readFileSync3(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function countHooks(hooks) {
-  if (!hooks || typeof hooks !== "object")
-    return 0;
-  let n = 0;
-  for (const v of Object.values(hooks)) {
-    if (Array.isArray(v))
-      n += v.length;
-  }
-  return n;
-}
-function readRules(startDir) {
-  const path = join3(startDir, ".claude/rules.md");
-  if (!existsSync3(path))
-    return 0;
-  try {
-    const content = readFileSync3(path, "utf8");
-    return content.split(`
-`).filter((l) => /^[-*]\s+\S/.test(l)).length;
-  } catch {
-    return 0;
-  }
-}
-
-// src/render/lines/memory.ts
-var BAR_WIDTH3 = 10;
-function renderMemory(ctx) {
-  if (!ctx.config.display.showMemoryUsage)
-    return null;
-  if (ctx.config.lineLayout !== "expanded")
-    return null;
-  if (!ctx.memoryInfo)
-    return null;
-  const c = ctx.config.colors;
-  const barColor = barColorForPercent(ctx.memoryInfo.usedPercent, {
-    default: c.usage,
-    warning: c.warning,
-    critical: c.critical
-  }, {
-    warning: ctx.config.display.warningThreshold,
-    critical: ctx.config.display.criticalThreshold
-  });
-  const filled = Math.floor(ctx.memoryInfo.usedPercent * BAR_WIDTH3 / 100);
-  const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(BAR_WIDTH3 - filled);
-  const usedGb = (ctx.memoryInfo.usedBytes / 1e9).toFixed(1);
-  const totalGb = (ctx.memoryInfo.totalBytes / 1e9).toFixed(1);
-  return `${color(c.label, "RAM")} ${color(barColor, bar)} ${color(c.label, `${ctx.memoryInfo.usedPercent}% (${usedGb} GB / ${totalGb} GB)`)}`;
-}
-
-// src/render/lines/duration.ts
-function renderDuration(ctx) {
-  const showDuration = ctx.config.display.showDuration;
-  const showSpeed = ctx.config.display.showSpeed;
-  if (!showDuration && !showSpeed)
-    return null;
-  const c = ctx.config.colors;
-  const parts = [];
-  if (showDuration) {
-    const ms = ctx.stdin.cost?.total_duration_ms;
-    if (typeof ms === "number" && ms > 0)
-      parts.push(`⏱ ${formatHms(ms)}`);
-  }
-  if (showSpeed) {
-    const tps = computeTokensPerSecond(ctx);
-    if (tps !== null)
-      parts.push(`out: ${tps.toFixed(1)} tok/s`);
-  }
-  if (parts.length === 0)
-    return null;
-  return color(c.label, parts.join(" | "));
-}
-function formatHms(ms) {
-  const total = Math.floor(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return m > 0 ? `${m}m` : `${s}s`;
-}
-function computeTokensPerSecond(_ctx) {
-  return null;
-}
-
 // src/render/width.ts
 var WIDTH_2_GLYPHS = new Set(["⚡", "⏱", "◐", "✓", "▸", "▹"]);
 function wcwidth(s) {
@@ -1381,67 +961,719 @@ function detectTerminalWidth(env, fallback) {
   return fallback ?? 120;
 }
 
-// src/render/index.ts
-var LINE_REGISTRY = {
-  project: renderProject,
-  context: renderContext,
-  apiTime: renderApiTime,
-  usage: renderUsage,
-  cost: renderCost,
-  promptCache: renderPromptCache,
-  tools: renderTools,
-  agents: renderAgents,
-  todos: renderTodos,
-  environment: renderEnvironment,
-  memory: renderMemory,
-  duration: renderDuration
+// src/render/widgets/project.ts
+var projectWidget = {
+  id: "project",
+  group: "header",
+  priority: 100,
+  minWidth: 20,
+  render(ctx) {
+    const body = renderProject(ctx);
+    if (body == null)
+      return null;
+    return { id: "project", group: "header", body, visualWidth: visibleWidth(body) };
+  }
 };
-function render(ctx) {
-  const order = ctx.config.elementOrder;
+
+// src/render/thresholds.ts
+function barColorForPercent(pct, palette, thresholds = { warning: 60, critical: 75 }) {
+  if (pct >= thresholds.critical)
+    return palette.critical;
+  if (pct >= thresholds.warning)
+    return palette.warning;
+  return palette.default;
+}
+
+// src/render/lines/context.ts
+var BAR_WIDTH = 10;
+function renderContext(ctx) {
+  if (!ctx.config.display.showContextBar)
+    return null;
+  const pct = ctx.stdin.context_window?.used_percentage;
+  if (typeof pct !== "number" || !Number.isFinite(pct))
+    return null;
+  const rounded = Math.round(pct);
+  const c = ctx.config.colors;
+  const barColor = barColorForPercent(rounded, {
+    default: c.context,
+    warning: c.warning,
+    critical: c.critical
+  }, {
+    warning: ctx.config.display.warningThreshold,
+    critical: ctx.config.display.criticalThreshold
+  });
+  const filled = Math.floor(rounded * BAR_WIDTH / 100);
+  const empty2 = BAR_WIDTH - filled;
+  const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(empty2);
+  const valuePart = formatValue(ctx, rounded);
+  return `${color(c.label, "Context")} ${color(barColor, bar)} ${color(barColor, valuePart)}`;
+}
+function formatValue(ctx, rounded) {
+  const cw = ctx.stdin.context_window;
+  const total = cw?.context_window_size ?? 0;
+  const used = cw?.total_input_tokens ?? 0;
+  const fmt = (n) => `${(n / 1000).toFixed(0)}k`;
+  switch (ctx.config.display.contextValue) {
+    case "tokens":
+      return `${fmt(used)}/${fmt(total)}`;
+    case "remaining":
+      return `${100 - rounded}%`;
+    case "both":
+      return `${rounded}% (${fmt(used)}/${fmt(total)})`;
+    default:
+      return `${rounded}%`;
+  }
+}
+
+// src/render/widgets/context.ts
+var contextWidget = {
+  id: "context",
+  group: "metrics",
+  priority: 90,
+  minWidth: 22,
+  render(ctx) {
+    const body = renderContext(ctx);
+    if (body == null)
+      return null;
+    return { id: "context", group: "metrics", body, visualWidth: visibleWidth(body) };
+  }
+};
+
+// src/render/lines/api-time.ts
+function renderApiTime(ctx) {
+  if (ctx.mode !== "ollama")
+    return null;
+  if (!ctx.config.display.showApiTime)
+    return null;
+  const c = ctx.config.colors;
+  const apiMs = ctx.stdin.cost?.total_api_duration_ms;
+  if (typeof apiMs === "number" && apiMs > 0) {
+    return `${color(c.label, "API")} ${color(c.apiTime, `${glyph("clock", ctx.config.display.glyphs)} ${formatDuration(apiMs)}`)}`;
+  }
+  return null;
+}
+function formatDuration(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor(totalSec % 3600 / 60);
+  const s = totalSec % 60;
+  if (h > 0)
+    return `${h}h ${m}m ${s}s`;
+  if (m > 0)
+    return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+// src/render/widgets/api-time.ts
+var apiTimeWidget = {
+  id: "apiTime",
+  group: "metrics",
+  priority: 80,
+  minWidth: 14,
+  render(ctx) {
+    const body = renderApiTime(ctx);
+    if (body == null)
+      return null;
+    return { id: "apiTime", group: "metrics", body, visualWidth: visibleWidth(body) };
+  }
+};
+
+// src/render/lines/usage.ts
+var BAR_WIDTH2 = 10;
+function renderUsage(ctx) {
+  if (ctx.mode !== "anthropic")
+    return null;
+  if (!ctx.config.display.showUsage)
+    return null;
+  if (!ctx.usageData)
+    return null;
+  const { fiveHour, sevenDay } = ctx.usageData;
+  const parts = [];
+  if (fiveHour !== null)
+    parts.push(formatWindow(ctx, "5h", fiveHour, ctx.usageData.fiveHourResetAt));
+  if (sevenDay !== null && sevenDay >= ctx.config.display.sevenDayThreshold) {
+    parts.push(formatWindow(ctx, "7d", sevenDay, ctx.usageData.sevenDayResetAt));
+  }
+  if (parts.length === 0)
+    return null;
+  const c = ctx.config.colors;
+  return `${color(c.label, "Usage")} ${parts.join(" | ")}`;
+}
+function formatWindow(ctx, label, pct, resetAt) {
+  const c = ctx.config.colors;
+  const lineColor = barColorForPercent(pct, {
+    default: c.usage,
+    warning: c.usageWarning,
+    critical: c.critical
+  }, {
+    warning: ctx.config.display.warningThreshold,
+    critical: ctx.config.display.criticalThreshold
+  });
+  let core;
+  if (ctx.config.display.usageBarEnabled && !ctx.config.display.usageCompact) {
+    const filled = Math.floor(pct * BAR_WIDTH2 / 100);
+    const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(BAR_WIDTH2 - filled);
+    core = `${color(lineColor, bar)} ${color(lineColor, `${pct}%`)} (${label})`;
+  } else {
+    core = color(lineColor, `${label}: ${pct}%`);
+  }
+  if (ctx.config.display.showResetLabel && resetAt) {
+    core += " " + color(c.label, formatReset(resetAt, ctx.config.display.timeFormat));
+  }
+  return core;
+}
+function formatReset(resetAt, fmt) {
+  const deltaMs = resetAt.getTime() - Date.now();
+  const rel = relativeTime(deltaMs);
+  if (fmt === "relative")
+    return `resets in ${rel}`;
+  const abs = resetAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (fmt === "absolute")
+    return `resets at ${abs}`;
+  return `resets in ${rel} (${abs})`;
+}
+function relativeTime(ms) {
+  if (ms <= 0)
+    return "now";
+  const min = Math.floor(ms / 60000);
+  if (min < 60)
+    return `~${min}m`;
+  const h = Math.floor(min / 60);
+  const remM = min % 60;
+  return remM > 0 ? `~${h}h${remM}m` : `~${h}h`;
+}
+
+// src/render/widgets/usage.ts
+var usageWidget = {
+  id: "usage",
+  group: "metrics",
+  priority: 80,
+  minWidth: 22,
+  render(ctx) {
+    const body = renderUsage(ctx);
+    if (body == null)
+      return null;
+    return { id: "usage", group: "metrics", body, visualWidth: visibleWidth(body) };
+  }
+};
+
+// src/render/lines/cost.ts
+function renderCost(ctx) {
+  if (ctx.mode !== "anthropic")
+    return null;
+  if (!ctx.costData)
+    return null;
+  if (!ctx.config.display.showCost) {
+    if (ctx.costData.source !== "native" || ctx.costData.totalUsd <= 0)
+      return null;
+  }
+  const c = ctx.config.colors;
+  const suffix = ctx.costData.source === "estimate" ? color(c.label, " (est)") : "";
+  return `${color(c.label, "Cost")} ${color(c.label, formatUsd(ctx.costData.totalUsd))}${suffix}`;
+}
+
+// src/render/widgets/cost.ts
+var costWidget = {
+  id: "cost",
+  group: "metrics",
+  priority: 70,
+  minWidth: 14,
+  render(ctx) {
+    const body = renderCost(ctx);
+    if (body == null)
+      return null;
+    return { id: "cost", group: "metrics", body, visualWidth: visibleWidth(body) };
+  }
+};
+
+// src/prompt-cache.ts
+function promptCacheRemainingMs(lastResponseAt, ttlSeconds, now = Date.now) {
+  if (!lastResponseAt)
+    return null;
+  const elapsedMs = now() - lastResponseAt.getTime();
+  const ttlMs = ttlSeconds * 1000;
+  return Math.max(0, ttlMs - elapsedMs);
+}
+function formatPromptCache(remainingMs) {
+  if (remainingMs === 0)
+    return "expired";
+  const seconds = Math.floor(remainingMs / 1000);
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m === 0 ? `${s}s` : `${m}m ${s}s`;
+}
+
+// src/render/lines/prompt-cache.ts
+function renderPromptCache(ctx) {
+  if (ctx.mode !== "anthropic")
+    return null;
+  if (!ctx.config.display.showPromptCache)
+    return null;
+  const remaining = promptCacheRemainingMs(ctx.transcript.lastAssistantResponseAt, ctx.config.display.promptCacheTtlSeconds);
+  if (remaining === null)
+    return null;
+  const c = ctx.config.colors;
+  return `${color(c.label, "cache")} ${color(c.label, formatPromptCache(remaining))}`;
+}
+
+// src/render/widgets/prompt-cache.ts
+var promptCacheWidget = {
+  id: "promptCache",
+  group: "metrics",
+  priority: 60,
+  minWidth: 14,
+  render(ctx) {
+    const body = renderPromptCache(ctx);
+    if (body == null)
+      return null;
+    return { id: "promptCache", group: "metrics", body, visualWidth: visibleWidth(body) };
+  }
+};
+
+// src/render/lines/memory.ts
+var BAR_WIDTH3 = 10;
+function renderMemory(ctx) {
+  if (!ctx.config.display.showMemoryUsage)
+    return null;
+  if (ctx.config.lineLayout !== "expanded")
+    return null;
+  if (!ctx.memoryInfo)
+    return null;
+  const c = ctx.config.colors;
+  const barColor = barColorForPercent(ctx.memoryInfo.usedPercent, {
+    default: c.usage,
+    warning: c.warning,
+    critical: c.critical
+  }, {
+    warning: ctx.config.display.warningThreshold,
+    critical: ctx.config.display.criticalThreshold
+  });
+  const filled = Math.floor(ctx.memoryInfo.usedPercent * BAR_WIDTH3 / 100);
+  const bar = glyph("barFull", ctx.config.display.glyphs).repeat(filled) + glyph("barEmpty", ctx.config.display.glyphs).repeat(BAR_WIDTH3 - filled);
+  const usedGb = (ctx.memoryInfo.usedBytes / 1e9).toFixed(1);
+  const totalGb = (ctx.memoryInfo.totalBytes / 1e9).toFixed(1);
+  return `${color(c.label, "RAM")} ${color(barColor, bar)} ${color(c.label, `${ctx.memoryInfo.usedPercent}% (${usedGb} GB / ${totalGb} GB)`)}`;
+}
+
+// src/render/widgets/memory.ts
+var memoryWidget = {
+  id: "memory",
+  group: "metrics",
+  priority: 50,
+  minWidth: 18,
+  render(ctx) {
+    const body = renderMemory(ctx);
+    if (body == null)
+      return null;
+    return { id: "memory", group: "metrics", body, visualWidth: visibleWidth(body) };
+  }
+};
+
+// src/render/lines/duration.ts
+function renderDuration(ctx) {
+  const showDuration = ctx.config.display.showDuration;
+  const showSpeed = ctx.config.display.showSpeed;
+  if (!showDuration && !showSpeed)
+    return null;
+  const c = ctx.config.colors;
+  const parts = [];
+  if (showDuration) {
+    const ms = ctx.stdin.cost?.total_duration_ms;
+    if (typeof ms === "number" && ms > 0)
+      parts.push(`⏱ ${formatHms(ms)}`);
+  }
+  if (showSpeed) {
+    const tps = computeTokensPerSecond(ctx);
+    if (tps !== null)
+      parts.push(`out: ${tps.toFixed(1)} tok/s`);
+  }
+  if (parts.length === 0)
+    return null;
+  return color(c.label, parts.join(" | "));
+}
+function formatHms(ms) {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m > 0 ? `${m}m` : `${s}s`;
+}
+function computeTokensPerSecond(_ctx) {
+  return null;
+}
+
+// src/render/widgets/duration.ts
+var durationWidget = {
+  id: "duration",
+  group: "metrics",
+  priority: 40,
+  minWidth: 12,
+  render(ctx) {
+    const body = renderDuration(ctx);
+    if (body == null)
+      return null;
+    return { id: "duration", group: "metrics", body, visualWidth: visibleWidth(body) };
+  }
+};
+
+// src/render/lines/tools.ts
+function renderTools(ctx) {
+  if (!ctx.config.display.showTools)
+    return null;
+  const tools = ctx.transcript.tools;
+  if (tools.length === 0)
+    return null;
+  const running = tools.filter((t) => t.status === "running");
+  const completed = tools.filter((t) => t.status === "completed");
+  const c = ctx.config.colors;
+  const parts = [];
+  for (const g of groupRunning(running).values()) {
+    const targetSuffix = g.target ? `: ${basename(g.target)}` : "";
+    const countSuffix = g.count > 1 ? ` ×${g.count}` : "";
+    parts.push(`${color(c.label, glyph("running", ctx.config.display.glyphs))} ${g.name}${countSuffix}${targetSuffix}`);
+  }
+  const tally = countByName(completed);
+  for (const [name, count] of tally)
+    parts.push(`${color(c.label, glyph("done", ctx.config.display.glyphs))} ${name}${count > 1 ? ` ×${count}` : ""}`);
+  return parts.join(color(c.label, " | "));
+}
+function groupRunning(entries) {
+  const out = new Map;
+  for (const t of entries) {
+    const sameNameAny = [...out.values()].find((g) => g.name === t.name);
+    if (sameNameAny && sameNameAny.target !== t.target) {
+      sameNameAny.target = undefined;
+      sameNameAny.count += 1;
+      continue;
+    }
+    const key = `${t.name}\x00${t.target ?? ""}`;
+    const existing = out.get(key);
+    if (existing)
+      existing.count += 1;
+    else
+      out.set(key, { name: t.name, target: t.target, count: 1 });
+  }
+  return out;
+}
+function countByName(entries) {
+  const m = new Map;
+  for (const e of entries)
+    m.set(e.name, (m.get(e.name) ?? 0) + 1);
+  return m;
+}
+
+// src/render/widgets/tools.ts
+var toolsWidget = {
+  id: "tools",
+  group: "activity",
+  priority: 90,
+  minWidth: 16,
+  render(ctx) {
+    const body = renderTools(ctx);
+    if (body == null)
+      return null;
+    return { id: "tools", group: "activity", body, visualWidth: visibleWidth(body) };
+  }
+};
+
+// src/render/lines/agents.ts
+function renderAgents(ctx) {
+  if (!ctx.config.display.showAgents)
+    return null;
+  const agents = ctx.transcript.agents;
+  if (agents.length === 0)
+    return null;
+  const c = ctx.config.colors;
+  const running = agents.filter((a) => a.status === "running");
+  const completed = agents.filter((a) => a.status === "completed");
   const lines = [];
-  if (order.includes("project")) {
-    const p = renderProject(ctx);
-    if (p)
-      pushLines(lines, p);
+  if (running.length === 1) {
+    lines.push(formatRunningAgent(running[0], ctx));
+  } else if (running.length >= 2) {
+    for (const a of running)
+      lines.push(formatRunningAgent(a, ctx));
   }
-  const merged = collectMerged(ctx);
-  if (merged)
-    pushLines(lines, merged);
-  const rendered = new Set(["project", "context", "apiTime", "usage"]);
-  for (const key of order) {
-    if (rendered.has(key))
-      continue;
-    const fn = LINE_REGISTRY[key];
-    if (!fn)
-      continue;
-    const out = fn(ctx);
-    if (out)
-      pushLines(lines, out);
-    rendered.add(key);
+  if (completed.length > 0) {
+    const tally = countByType(completed);
+    const completedParts = [];
+    for (const [type, count] of tally) {
+      completedParts.push(`${color(c.label, glyph("done", ctx.config.display.glyphs))} ${type}${count > 1 ? ` ×${count}` : ""}`);
+    }
+    lines.push(completedParts.join(color(c.label, " | ")));
   }
-  const max = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
-  const truncated = lines.map((l) => truncateLine(l, max));
-  if (truncated.length === 0 || truncated.every((l) => l.trim() === "")) {
+  return lines.length > 0 ? lines.join(`
+`) : null;
+}
+function formatRunningAgent(a, ctx) {
+  const c = ctx.config.colors;
+  const sym = glyph("running", ctx.config.display.glyphs);
+  const modelTag = a.model ? ` [${a.model}]` : "";
+  const desc = a.description ? `: ${a.description}` : "";
+  const elapsed = a.endTime ? "" : ` (${formatElapsed(a.startTime)})`;
+  return `${color(c.label, sym)} ${a.type}${modelTag}${desc}${color(c.label, elapsed)}`;
+}
+function countByType(entries) {
+  const m = new Map;
+  for (const e of entries)
+    m.set(e.type, (m.get(e.type) ?? 0) + 1);
+  return m;
+}
+function formatElapsed(start) {
+  const sec = Math.floor((Date.now() - start.getTime()) / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+// src/render/widgets/agents.ts
+var agentsWidget = {
+  id: "agents",
+  group: "activity",
+  priority: 85,
+  minWidth: 16,
+  render(ctx) {
+    const body = renderAgents(ctx);
+    if (body == null)
+      return null;
+    return { id: "agents", group: "activity", body, visualWidth: visibleWidth(body) };
+  }
+};
+
+// src/render/lines/todos.ts
+function renderTodos(ctx) {
+  if (!ctx.config.display.showTodos)
+    return null;
+  const todos = ctx.transcript.todos;
+  if (todos.length === 0)
+    return null;
+  const total = todos.length;
+  const completed = todos.filter((t) => t.status === "completed").length;
+  const inProgress = todos.find((t) => t.status === "in_progress");
+  const c = ctx.config.colors;
+  const head = inProgress ? `${color(c.label, glyph("active", ctx.config.display.glyphs))} ${inProgress.content}` : `${color(c.label, glyph("todo", ctx.config.display.glyphs))} no active todo`;
+  return `${head} ${color(c.label, `(${completed}/${total})`)}`;
+}
+
+// src/render/widgets/todos.ts
+var todosWidget = {
+  id: "todos",
+  group: "activity",
+  priority: 70,
+  minWidth: 20,
+  render(ctx) {
+    const body = renderTodos(ctx);
+    if (body == null)
+      return null;
+    return { id: "todos", group: "activity", body, visualWidth: visibleWidth(body) };
+  }
+};
+
+// src/render/lines/environment.ts
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
+import { dirname, join as join3 } from "node:path";
+import { homedir as homedir2 } from "node:os";
+function renderEnvironment(ctx) {
+  if (!ctx.config.display.showConfigCounts)
+    return null;
+  const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd;
+  if (!dir)
+    return null;
+  const counts = countAll(dir);
+  const c = ctx.config.colors;
+  const parts = [
+    `${counts.claudeMd} CLAUDE.md`,
+    `${counts.rules} rules`,
+    `${counts.mcps} MCPs`,
+    `${counts.hooks} hooks`
+  ];
+  return color(c.label, parts.join(" | "));
+}
+function countAll(startDir) {
+  const home = homedir2();
+  let claudeMd = 0;
+  let dir = startDir;
+  while (dir && dir.length > 1 && dir.startsWith(home)) {
+    if (existsSync3(join3(dir, "CLAUDE.md")))
+      claudeMd += 1;
+    const parent = dirname(dir);
+    if (parent === dir)
+      break;
+    dir = parent;
+  }
+  const settings = readSettings(join3(home, ".claude/settings.json"));
+  const mcps = Object.keys(settings?.mcpServers ?? {}).length;
+  const hooks = countHooks(settings?.hooks);
+  const rules = readRules(startDir);
+  return { claudeMd, rules, mcps, hooks };
+}
+function readSettings(path) {
+  try {
+    return JSON.parse(readFileSync3(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function countHooks(hooks) {
+  if (!hooks || typeof hooks !== "object")
+    return 0;
+  let n = 0;
+  for (const v of Object.values(hooks)) {
+    if (Array.isArray(v))
+      n += v.length;
+  }
+  return n;
+}
+function readRules(startDir) {
+  const path = join3(startDir, ".claude/rules.md");
+  if (!existsSync3(path))
+    return 0;
+  try {
+    const content = readFileSync3(path, "utf8");
+    return content.split(`
+`).filter((l) => /^[-*]\s+\S/.test(l)).length;
+  } catch {
+    return 0;
+  }
+}
+
+// src/render/widgets/environment.ts
+var environmentWidget = {
+  id: "environment",
+  group: "activity",
+  priority: 30,
+  minWidth: 14,
+  render(ctx) {
+    const body = renderEnvironment(ctx);
+    if (body == null)
+      return null;
+    return { id: "environment", group: "activity", body, visualWidth: visibleWidth(body) };
+  }
+};
+
+// src/render/widgets/index.ts
+var WIDGETS = [
+  projectWidget,
+  contextWidget,
+  apiTimeWidget,
+  usageWidget,
+  costWidget,
+  promptCacheWidget,
+  memoryWidget,
+  durationWidget,
+  toolsWidget,
+  agentsWidget,
+  todosWidget,
+  environmentWidget
+];
+function visibleWidgets(config) {
+  return WIDGETS.filter((w) => isVisible(w, config));
+}
+function isVisible(w, config) {
+  const d = config.display;
+  switch (w.id) {
+    case "project":
+      return true;
+    case "context":
+      return d.showContextBar !== false;
+    case "apiTime":
+      return d.showApiTime !== false;
+    case "usage":
+      return d.showUsage !== false;
+    case "cost":
+      return true;
+    case "promptCache":
+      return d.showPromptCache === true;
+    case "memory":
+      return d.showMemoryUsage === true;
+    case "duration":
+      return d.showDuration === true || d.showSpeed === true;
+    case "tools":
+      return d.showTools === true;
+    case "agents":
+      return d.showAgents === true;
+    case "todos":
+      return d.showTodos === true;
+    case "environment":
+      return d.showConfigCounts === true;
+    default:
+      return true;
+  }
+}
+
+// src/render/layout/row.ts
+var rowLayout = {
+  name: "row",
+  pack(cells, termWidth, config) {
+    const lines = [];
+    function pushLines(out) {
+      for (const ln of out.split(`
+`)) {
+        if (ln.length > 0)
+          lines.push(ln);
+      }
+    }
+    function bodyOf(cell) {
+      if ("body" in cell)
+        return cell.body;
+      return cell.text;
+    }
+    const byId = new Map;
+    for (const c of cells) {
+      if (c.id)
+        byId.set(c.id, c);
+    }
+    const projectCell = byId.get("project");
+    if (projectCell) {
+      pushLines(bodyOf(projectCell));
+    }
+    const ctxCell = byId.get("context");
+    const rightCell = byId.get("apiTime") ?? byId.get("usage");
+    let mergedLine = null;
+    if (ctxCell && rightCell) {
+      const sep = color(config.colors.label, glyph("sep", config.display.glyphs));
+      mergedLine = `${bodyOf(ctxCell)} ${sep} ${bodyOf(rightCell)}`;
+    } else if (ctxCell) {
+      mergedLine = bodyOf(ctxCell);
+    } else if (rightCell) {
+      mergedLine = bodyOf(rightCell);
+    }
+    if (mergedLine)
+      pushLines(mergedLine);
+    const rendered = new Set(["project", "context", "apiTime", "usage"]);
+    for (const key of config.elementOrder) {
+      if (rendered.has(key))
+        continue;
+      const cell = byId.get(key);
+      if (!cell)
+        continue;
+      pushLines(bodyOf(cell));
+      rendered.add(key);
+    }
+    return lines.map((l) => truncateLine(l, termWidth));
+  }
+};
+
+// src/render/layout/index.ts
+var LAYOUTS = {
+  row: rowLayout,
+  hush: rowLayout
+};
+
+// src/render/index.ts
+function render(ctx) {
+  const widgets = visibleWidgets(ctx.config);
+  const layoutName = "row";
+  const layout = LAYOUTS[layoutName];
+  const termWidth = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
+  const cells = widgets.map((w) => {
+    const c = w.render(ctx);
+    return c ? { ...c, id: w.id, group: w.group } : null;
+  }).filter((c) => c !== null);
+  const outputLines = layout.pack(cells, termWidth, ctx.config);
+  if (outputLines.length === 0 || outputLines.every((l) => l.trim() === "")) {
     return color(ctx.config.colors.label, "ohud");
   }
-  return truncated.join(`
+  return outputLines.join(`
 `);
-}
-function pushLines(lines, out) {
-  for (const ln of out.split(`
-`)) {
-    if (ln.length > 0)
-      lines.push(ln);
-  }
-}
-function collectMerged(ctx) {
-  const ctxLine = renderContext(ctx);
-  const right = ctx.mode === "ollama" ? renderApiTime(ctx) : renderUsage(ctx);
-  if (ctxLine && right) {
-    const sep = color(ctx.config.colors.label, glyph("sep", ctx.config.display.glyphs));
-    return `${ctxLine} ${sep} ${right}`;
-  }
-  return ctxLine ?? right ?? null;
 }
 
 // src/index.ts

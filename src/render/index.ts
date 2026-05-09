@@ -1,88 +1,35 @@
 // src/render/index.ts
 import { color } from "./colors.js";
-import { glyph } from "./glyphs.js";
 import type { RenderContext } from "../types.js";
-import { renderProject } from "./lines/project.js";
-import { renderContext } from "./lines/context.js";
-import { renderApiTime } from "./lines/api-time.js";
-import { renderUsage } from "./lines/usage.js";
-import { renderCost } from "./lines/cost.js";
-import { renderPromptCache } from "./lines/prompt-cache.js";
-import { renderTools } from "./lines/tools.js";
-import { renderAgents } from "./lines/agents.js";
-import { renderTodos } from "./lines/todos.js";
-import { renderEnvironment } from "./lines/environment.js";
-import { renderMemory } from "./lines/memory.js";
-import { renderDuration } from "./lines/duration.js";
-import { detectTerminalWidth, truncateLine } from "./width.js";
-
-type LineFn = (ctx: RenderContext) => string | null;
-
-const LINE_REGISTRY: Record<string, LineFn> = {
-  project: renderProject,
-  context: renderContext,
-  apiTime: renderApiTime,
-  usage: renderUsage,
-  cost: renderCost,
-  promptCache: renderPromptCache,
-  tools: renderTools,
-  agents: renderAgents,
-  todos: renderTodos,
-  environment: renderEnvironment,
-  memory: renderMemory,
-  duration: renderDuration,
-};
+import type { WidgetCell, HushCell } from "./widget.js";
+import { visibleWidgets } from "./widgets/index.js";
+import { LAYOUTS } from "./layout/index.js";
+import { detectTerminalWidth } from "./width.js";
 
 export function render(ctx: RenderContext): string {
-  const order = ctx.config.elementOrder;
-  const lines: string[] = [];
+  const widgets = visibleWidgets(ctx.config);
 
-  // Line 1: project
-  if (order.includes("project")) {
-    const p = renderProject(ctx);
-    if (p) pushLines(lines, p);
-  }
+  // Task A: only RowLayout exists. Task B will wire "hush" properly.
+  // Cast to avoid referencing the layout config field which doesn't exist yet
+  // in HudConfig (added in Task C). Fallback to "row" always for now.
+  const layoutName = "row" as const;
+  const layout = LAYOUTS[layoutName];
+  const termWidth = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
 
-  // Line 2: context (left) merged with apiTime|usage (right) per mergeGroups
-  const merged = collectMerged(ctx);
-  if (merged) pushLines(lines, merged);
+  // Render each widget to a cell. WidgetCells for RowLayout (Task A only uses render()).
+  const cells = widgets
+    .map((w): WidgetCell | HushCell | null => {
+      const c = w.render(ctx);
+      return c ? { ...c, id: w.id, group: w.group } : null;
+    })
+    .filter((c): c is WidgetCell | HushCell => c !== null);
 
-  // Subsequent lines: in elementOrder, skipping already-rendered ones
-  const rendered = new Set<string>(["project", "context", "apiTime", "usage"]);
-  for (const key of order) {
-    if (rendered.has(key)) continue;
-    const fn = LINE_REGISTRY[key];
-    if (!fn) continue;
-    const out = fn(ctx);
-    if (out) pushLines(lines, out);
-    rendered.add(key);
-  }
-
-  const max = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
-  const truncated = lines.map((l) => truncateLine(l, max));
+  const outputLines = layout.pack(cells, termWidth, ctx.config);
 
   // Fallback: if no content, return minimum sentinel
-  if (truncated.length === 0 || truncated.every((l) => l.trim() === "")) {
+  if (outputLines.length === 0 || outputLines.every((l) => l.trim() === "")) {
     return color(ctx.config.colors.label, "ohud");
   }
-  return truncated.join("\n");
-}
 
-// Split renderer output on `\n` so any line module can return multi-line strings
-// (e.g. agents with 2+ running entries — see `src/render/lines/agents.ts`).
-// Empty lines are filtered. Truncation downstream stays per-line.
-function pushLines(lines: string[], out: string): void {
-  for (const ln of out.split("\n")) {
-    if (ln.length > 0) lines.push(ln);
-  }
-}
-
-function collectMerged(ctx: RenderContext): string | null {
-  const ctxLine = renderContext(ctx);
-  const right = ctx.mode === "ollama" ? renderApiTime(ctx) : renderUsage(ctx);
-  if (ctxLine && right) {
-    const sep = color(ctx.config.colors.label, glyph("sep", ctx.config.display.glyphs));
-    return `${ctxLine} ${sep} ${right}`;
-  }
-  return ctxLine ?? right ?? null;
+  return outputLines.join("\n");
 }

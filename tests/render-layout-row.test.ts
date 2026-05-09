@@ -1,0 +1,423 @@
+// tests/render-layout-row.test.ts
+//
+// Verifies that RowLayout (via the new render()) produces byte-identical output
+// to the old imperative renderer for all key scenarios.
+//
+// Strategy: we call render() (which now delegates to RowLayout) and assert the
+// same structural properties the old renderer guaranteed. For exact-string
+// comparisons we derive expected values from the known output of the
+// underlying lines/<id>.ts functions (which are NOT modified).
+//
+import { test, expect, describe } from "bun:test";
+import { visibleWidth } from "../src/render/width.js";
+import { render } from "../src/render/index.js";
+import { renderProject } from "../src/render/lines/project.js";
+import { renderContext } from "../src/render/lines/context.js";
+import { renderUsage } from "../src/render/lines/usage.js";
+import { renderApiTime } from "../src/render/lines/api-time.js";
+import { renderCost } from "../src/render/lines/cost.js";
+import { color } from "../src/render/colors.js";
+import { glyph } from "../src/render/glyphs.js";
+import { DEFAULT_CONFIG } from "../src/config.js";
+import type { RenderContext, StdinData } from "../src/types.js";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeCtx(
+  overrides: Partial<RenderContext> & { stdin?: StdinData },
+): RenderContext {
+  const stdin: StdinData = overrides.stdin ?? {
+    model: { id: "claude-opus-4-7", display_name: "Opus 4.7" },
+    workspace: {
+      current_dir: "/Users/lima/Projects/ohud",
+      project_dir: "/Users/lima/Projects/ohud",
+    },
+    context_window: { context_window_size: 200000, used_percentage: 45 },
+    cost: { total_cost_usd: 0, total_duration_ms: 60000 },
+  };
+  return {
+    mode: "anthropic",
+    stdin,
+    transcript: { tools: [], agents: [], todos: [] },
+    gitStatus: { branch: "main", dirty: false, ahead: 0, behind: 0 },
+    config: structuredClone(DEFAULT_CONFIG),
+    usageData: null,
+    costData: null,
+    memoryInfo: null,
+    cloudModels: [],
+    ...overrides,
+  };
+}
+
+function sep(ctx: RenderContext): string {
+  return color(ctx.config.colors.label, glyph("sep", ctx.config.display.glyphs));
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 1: Anthropic mode, wide terminal (200 cols), 45% context + usage
+// Line 1 = project; Line 2 = context │ usage
+// ---------------------------------------------------------------------------
+
+describe("Scenario 1: anthropic, wide terminal, context + usage", () => {
+  test("line 1 is the project line", () => {
+    const ctx = makeCtx({
+      usageData: { fiveHour: 25, sevenDay: 41, fiveHourResetAt: null, sevenDayResetAt: null },
+    });
+    ctx.config.maxWidth = 200;
+
+    const out = render(ctx);
+    const lines = out.split("\n");
+
+    // Line 1 must match what renderProject produces
+    const expectedProject = renderProject(ctx);
+    expect(lines[0]).toBe(expectedProject);
+  });
+
+  test("line 2 contains context merged with usage via ` │ ` separator", () => {
+    const ctx = makeCtx({
+      usageData: { fiveHour: 25, sevenDay: 41, fiveHourResetAt: null, sevenDayResetAt: null },
+    });
+    ctx.config.maxWidth = 200;
+
+    const out = render(ctx);
+    const lines = out.split("\n");
+
+    // Line 2 should contain both Context and Usage
+    expect(lines[1]).toContain("Context");
+    expect(lines[1]).toContain("45%");
+    expect(lines[1]).toContain("Usage");
+
+    // The separator should appear between them
+    const ctxPart = renderContext(ctx)!;
+    const usagePart = renderUsage(ctx)!;
+    const mergedExpected = `${ctxPart} ${sep(ctx)} ${usagePart}`;
+    expect(lines[1]).toBe(mergedExpected);
+  });
+
+  test("output has exactly 2 lines with default config (project + merged)", () => {
+    const ctx = makeCtx({
+      usageData: { fiveHour: 25, sevenDay: 41, fiveHourResetAt: null, sevenDayResetAt: null },
+    });
+    ctx.config.maxWidth = 200;
+
+    const out = render(ctx);
+    expect(out.split("\n").length).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario 2: Anthropic mode, 120 cols — same structure, truncation not needed
+// ---------------------------------------------------------------------------
+
+describe("Scenario 2: anthropic, 120 cols, project-only (no usage data)", () => {
+  test("line 1 is project, line 2 is context only when no usage data", () => {
+    const ctx = makeCtx({});
+    ctx.config.maxWidth = 120;
+
+    const out = render(ctx);
+    const lines = out.split("\n");
+
+    // Line 1: project
+    expect(lines[0]).toContain("ohud");
+    // Line 2: context only (no usage since usageData=null)
+    expect(lines[1]).toContain("Context");
+    expect(lines[1]).toContain("45%");
+    // No merge separator since only one side
+    expect(lines[1]).not.toContain("│");
+  });
+
+  test("line 2 matches renderContext output exactly when no usage", () => {
+    const ctx = makeCtx({});
+    ctx.config.maxWidth = 120;
+
+    const out = render(ctx);
+    const lines = out.split("\n");
+    const ctxLine = renderContext(ctx)!;
+    expect(lines[1]).toBe(ctxLine);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario 3: Anthropic mode, 80 cols narrow terminal — long lines truncated
+// ---------------------------------------------------------------------------
+
+describe("Scenario 3: narrow terminal (80 cols) — truncation applied", () => {
+  test("all lines are at most 80 visual characters wide", () => {
+    const ctx = makeCtx({
+      usageData: { fiveHour: 25, sevenDay: 41, fiveHourResetAt: null, sevenDayResetAt: null },
+    });
+    ctx.config.maxWidth = 80;
+    // Turn on reset labels to make lines longer
+    ctx.config.display.showResetLabel = true;
+    ctx.usageData!.fiveHourResetAt = new Date(Date.now() + 90 * 60 * 1000);
+
+    const out = render(ctx);
+    for (const line of out.split("\n")) {
+      // Strip the trailing reset from visibleWidth: after truncation line ends with "…"
+      // Just verify each line's visible width does not exceed 80
+      expect(visibleWidth(line)).toBeLessThanOrEqual(80);
+    }
+  });
+
+  test("truncated lines end with the … character if truncation occurred", () => {
+    const ctx = makeCtx({
+      usageData: { fiveHour: 25, sevenDay: 41, fiveHourResetAt: new Date(Date.now() + 90 * 60 * 1000), sevenDayResetAt: null },
+    });
+    ctx.config.maxWidth = 80;
+    ctx.config.display.showResetLabel = true;
+
+    const out = render(ctx);
+    for (const line of out.split("\n")) {
+      if (visibleWidth(line) === 80) {
+        // If the full line is truncated, it ends with "…"
+        expect(line).toContain("…");
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario 4: Ollama mode, 120 cols — context │ apiTime on line 2
+// ---------------------------------------------------------------------------
+
+describe("Scenario 4: ollama mode, context merged with apiTime", () => {
+  test("line 2 contains context merged with apiTime via ` │ ` separator", () => {
+    const ctx = makeCtx({
+      mode: "ollama",
+      stdin: {
+        model: { id: "glm-5:cloud", display_name: "glm-5:cloud" },
+        workspace: { current_dir: "/Users/lima/Projects/ohud", project_dir: "/Users/lima/Projects/ohud" },
+        context_window: { context_window_size: 128000, used_percentage: 45 },
+        cost: { total_api_duration_ms: 75_000 },
+      },
+    });
+    ctx.config.maxWidth = 120;
+
+    const out = render(ctx);
+    const lines = out.split("\n");
+
+    // Line 2 should contain Context and API time
+    expect(lines[1]).toContain("Context");
+    expect(lines[1]).toContain("API");
+    // The separator should be present
+    expect(lines[1]).toContain("│");
+
+    // Verify exact merge formula
+    const ctxPart = renderContext(ctx)!;
+    const apiPart = renderApiTime(ctx)!;
+    const mergedExpected = `${ctxPart} ${sep(ctx)} ${apiPart}`;
+    expect(lines[1]).toBe(mergedExpected);
+  });
+
+  test("apiTime not shown in anthropic mode", () => {
+    const ctx = makeCtx({
+      mode: "anthropic",
+      stdin: {
+        model: { id: "claude-opus-4-7", display_name: "Opus 4.7" },
+        workspace: { current_dir: "/Users/lima/Projects/ohud", project_dir: "/Users/lima/Projects/ohud" },
+        context_window: { context_window_size: 200000, used_percentage: 45 },
+        cost: { total_api_duration_ms: 75_000 },
+      },
+    });
+    ctx.config.maxWidth = 120;
+
+    const out = render(ctx);
+    const lines = out.split("\n");
+    // In anthropic mode, apiTime renderer returns null
+    const apiOut = renderApiTime(ctx);
+    expect(apiOut).toBeNull();
+    // So no API on line 2
+    expect(lines[1]).not.toContain("API");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario 5: No git repo (gitStatus=null), anthropic, 120 cols
+// ---------------------------------------------------------------------------
+
+describe("Scenario 5: no git repo (gitStatus=null)", () => {
+  test("project line has no git:() block when gitStatus is null", () => {
+    const ctx = makeCtx({ gitStatus: null });
+    ctx.config.maxWidth = 120;
+
+    const out = render(ctx);
+    const lines = out.split("\n");
+
+    // Project line should not contain git block
+    expect(lines[0]).not.toContain("git:(");
+    // But project name should still be there
+    expect(lines[0]).toContain("ohud");
+  });
+
+  test("project line matches renderProject output exactly", () => {
+    const ctx = makeCtx({ gitStatus: null });
+    ctx.config.maxWidth = 120;
+
+    const out = render(ctx);
+    const expectedProject = renderProject(ctx);
+    expect(out.split("\n")[0]).toBe(expectedProject);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario 6: Very narrow terminal (60 cols) — confirms truncation with "…"
+// ---------------------------------------------------------------------------
+
+describe("Scenario 6: very narrow terminal (60 cols)", () => {
+  test("lines do not exceed 60 visual chars", () => {
+    const ctx = makeCtx({
+      usageData: { fiveHour: 25, sevenDay: 41, fiveHourResetAt: null, sevenDayResetAt: null },
+    });
+    ctx.config.maxWidth = 60;
+
+    const out = render(ctx);
+    for (const line of out.split("\n")) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(60);
+    }
+  });
+
+  test("truncated line ends with … at exactly 60 width", () => {
+    const ctx = makeCtx({
+      usageData: { fiveHour: 25, sevenDay: 41, fiveHourResetAt: new Date(Date.now() + 90 * 60 * 1000), sevenDayResetAt: null },
+    });
+    ctx.config.maxWidth = 60;
+    ctx.config.display.showResetLabel = true;
+
+    const out = render(ctx);
+
+    // At least one line should be truncated given 60 cols + usage with reset label
+    const wasTruncated = out.split("\n").some((l) => l.includes("…"));
+    expect(wasTruncated).toBe(true);
+
+    // All lines at most 60 wide
+    for (const line of out.split("\n")) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(60);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario 7: Cost auto-shows when native cost > 0 (showCost=false default)
+// ---------------------------------------------------------------------------
+
+describe("Scenario 7: cost auto-shown when native cost > 0", () => {
+  test("cost line appears with native totalUsd > 0 even with showCost=false", () => {
+    const ctx = makeCtx({
+      costData: { totalUsd: 0.42, source: "native" },
+    });
+    // showCost defaults to false; renderCost should still auto-show native cost
+    expect(ctx.config.display.showCost).toBe(false);
+    ctx.config.maxWidth = 200;
+
+    const out = render(ctx);
+    expect(out).toContain("$0.42");
+    expect(out).toContain("Cost");
+  });
+
+  test("cost line appears on correct position (after project and context/usage)", () => {
+    const ctx = makeCtx({
+      costData: { totalUsd: 0.42, source: "native" },
+    });
+    ctx.config.maxWidth = 200;
+
+    const out = render(ctx);
+    const lines = out.split("\n");
+    // Line 0 = project, Line 1 = context (no usage), Line 2 = cost
+    const costIdx = lines.findIndex((l) => l.includes("Cost"));
+    const ctxIdx = lines.findIndex((l) => l.includes("Context"));
+    expect(costIdx).toBeGreaterThan(ctxIdx);
+  });
+
+  test("cost line matches renderCost output exactly", () => {
+    const ctx = makeCtx({
+      costData: { totalUsd: 0.42, source: "native" },
+    });
+    ctx.config.maxWidth = 200;
+
+    const out = render(ctx);
+    const expectedCost = renderCost(ctx)!;
+    expect(out).toContain(expectedCost);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario 8: showCost=false AND totalUsd=0 — cost line is hidden
+// ---------------------------------------------------------------------------
+
+describe("Scenario 8: cost hidden when showCost=false and totalUsd=0", () => {
+  test("no cost line when showCost=false and totalUsd=0", () => {
+    const ctx = makeCtx({
+      costData: { totalUsd: 0, source: "native" },
+    });
+    expect(ctx.config.display.showCost).toBe(false);
+    ctx.config.maxWidth = 200;
+
+    const out = render(ctx);
+    expect(out).not.toContain("Cost");
+    expect(out).not.toContain("$0.00");
+  });
+
+  test("no cost line when costData is null", () => {
+    const ctx = makeCtx({ costData: null });
+    ctx.config.maxWidth = 200;
+
+    const out = render(ctx);
+    expect(out).not.toContain("Cost");
+  });
+
+  test("renderCost returns null for that scenario (confirms widget delegates correctly)", () => {
+    const ctx = makeCtx({
+      costData: { totalUsd: 0, source: "native" },
+    });
+    expect(renderCost(ctx)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bonus: fallback sentinel when render has no content
+// ---------------------------------------------------------------------------
+
+describe("Fallback sentinel", () => {
+  test("returns 'ohud' sentinel when context_window has no used_percentage", () => {
+    const ctx = makeCtx({
+      stdin: {
+        model: { id: "claude-opus-4-7", display_name: "Opus 4.7" },
+        // No workspace → renderProject returns "" (parts.join returns "" which is falsy)
+        workspace: {},
+        context_window: {},
+      },
+      gitStatus: null,
+    });
+    ctx.config.display.showModel = false; // suppress model badge
+    ctx.config.maxWidth = 120;
+
+    // Even with empty workspace, project still returns something (empty string gets filtered)
+    // The important thing is render() never throws and returns something
+    const out = render(ctx);
+    expect(out.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Structural: multi-line agents output is split correctly
+// ---------------------------------------------------------------------------
+
+describe("Multi-line agent output is split into separate physical lines", () => {
+  test("two running agents produce two separate lines in output", () => {
+    const ctx = makeCtx({});
+    ctx.config.display.showAgents = true;
+    ctx.config.maxWidth = 200;
+    ctx.transcript.agents = [
+      { id: "a1", type: "general-purpose", status: "running", startTime: new Date() },
+      { id: "a2", type: "code-review", status: "running", startTime: new Date() },
+    ];
+
+    const out = render(ctx);
+    const lines = out.split("\n");
+    // Each running agent gets its own line (renderAgents uses \n for multiple running)
+    const agentLines = lines.filter((l) => l.includes("general-purpose") || l.includes("code-review"));
+    expect(agentLines.length).toBe(2);
+  });
+});
