@@ -545,6 +545,18 @@ var execFileP = promisify(execFile);
 async function getGitStatus(cwd) {
   if (!cwd)
     return null;
+  const [statusResult, remoteUrl] = await Promise.all([
+    runGitStatus(cwd),
+    getRemoteUrl(cwd)
+  ]);
+  if (!statusResult)
+    return null;
+  const out = statusResult;
+  if (remoteUrl)
+    out.remoteUrl = remoteUrl;
+  return out;
+}
+async function runGitStatus(cwd) {
   let stdout;
   try {
     const r = await execFileP("git", ["status", "--branch", "--porcelain=v2"], { cwd, timeout: 1000 });
@@ -574,6 +586,15 @@ async function getGitStatus(cwd) {
   if (!branch)
     return null;
   return { branch, dirty, ahead, behind };
+}
+async function getRemoteUrl(cwd) {
+  try {
+    const r = await execFileP("git", ["config", "--get", "remote.origin.url"], { cwd, timeout: 1000 });
+    const url = r.stdout.trim();
+    return url || undefined;
+  } catch {
+    return;
+  }
 }
 
 // src/usage.ts
@@ -1001,11 +1022,13 @@ var projectWidget = {
       const dirty = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty;
       const branchText = ctx.gitStatus.branch + (dirty ? "*" : "");
       const attention = dirty ? "warning" : "normal";
+      const branchLink = remoteUrlToHttp(ctx.gitStatus.remoteUrl);
       cells.push({
         group: "header",
         text: branchText,
         attention,
-        baseColor: dirty ? undefined : "green"
+        baseColor: dirty ? undefined : "green",
+        link: branchLink
       });
     }
     if (ctx.config.display.showModel) {
@@ -1034,6 +1057,24 @@ function condenseModelId(nameOrId) {
     s = s.slice(7);
   s = s.replace(/(\d)-(\d)/g, "$1.$2").toLowerCase();
   return s;
+}
+function remoteUrlToHttp(remoteUrl) {
+  if (!remoteUrl)
+    return;
+  const url = remoteUrl.trim();
+  if (!url)
+    return;
+  const sshMatch = /^git@(github\.com|gitlab\.com|bitbucket\.org):(.+?)(?:\.git)?$/.exec(url);
+  if (sshMatch) {
+    const host = sshMatch[1];
+    const path = sshMatch[2];
+    return `https://${host}/${path}`;
+  }
+  const httpsMatch = /^(https?:\/\/(?:github\.com|gitlab\.com|bitbucket\.org)\/[^?#]+?)(?:\.git)?\/?$/.exec(url);
+  if (httpsMatch) {
+    return httpsMatch[1];
+  }
+  return;
 }
 
 // src/render/thresholds.ts
@@ -1957,13 +1998,13 @@ function link(text, url, enabled = true) {
 
 // src/render/layout/hush.ts
 var SEP = "  ";
-var COLORS = {
-  cyan: "\x1B[36m",
-  green: "\x1B[32m",
-  blue: "\x1B[34m",
-  magenta: "\x1B[35m",
-  yellow: "\x1B[33m",
-  red: "\x1B[31m"
+var SGR_FG = {
+  cyan: "36",
+  green: "32",
+  blue: "34",
+  magenta: "35",
+  yellow: "33",
+  red: "31"
 };
 var RESET_FG = "\x1B[39m";
 function colorDisabled2(env) {
@@ -1976,10 +2017,20 @@ function colorDisabled2(env) {
 function applyColor(text, colorName, env) {
   if (colorDisabled2(env))
     return text;
-  const code = COLORS[colorName];
+  const code = SGR_FG[colorName];
   if (!code)
     return text;
-  return `${code}${text}${RESET_FG}`;
+  return `\x1B[${code}m${text}${RESET_FG}`;
+}
+function applyDimColor(text, colorName, env) {
+  if (colorDisabled2(env))
+    return text;
+  if (!colorName)
+    return dim(text, env);
+  const code = SGR_FG[colorName];
+  if (!code)
+    return dim(text, env);
+  return `\x1B[2;${code}m${text}\x1B[22;39m`;
 }
 function glyphMode(config) {
   const g = config.display.glyphs;
@@ -2003,7 +2054,7 @@ function renderCell(cell, now, mode, env) {
   const noColor = colorDisabled2(env);
   switch (cell.attention) {
     case "muted":
-      text = dim(text, env);
+      text = applyDimColor(text, cell.baseColor, env);
       break;
     case "normal":
       if (!noColor && cell.baseColor) {

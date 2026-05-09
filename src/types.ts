@@ -172,6 +172,9 @@ export interface GitStatus {
   dirty: boolean;
   ahead: number;
   behind: number;
+  /** Optional remote URL (origin) — populated when `git config --get remote.origin.url` succeeds.
+   *  Surface-level field used by HushLayout to emit OSC 8 hyperlinks on the branch cell. */
+  remoteUrl?: string;
 }
 
 // === Memory (opt-in) ===

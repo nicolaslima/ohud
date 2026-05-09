@@ -25,14 +25,14 @@ import { truncateLine } from "../width.js";
 
 const SEP = "  ";
 
-// ANSI color codes for baseline palette
-const COLORS: Record<string, string> = {
-  cyan:    "\x1b[36m",
-  green:   "\x1b[32m",
-  blue:    "\x1b[34m",
-  magenta: "\x1b[35m",
-  yellow:  "\x1b[33m",
-  red:     "\x1b[31m",
+// SGR digit codes for baseline palette (used for both standalone and dim+color combos).
+const SGR_FG: Record<string, string> = {
+  cyan:    "36",
+  green:   "32",
+  blue:    "34",
+  magenta: "35",
+  yellow:  "33",
+  red:     "31",
 };
 
 const RESET_FG = "\x1b[39m";
@@ -45,9 +45,24 @@ function colorDisabled(env: NodeJS.ProcessEnv): boolean {
 
 function applyColor(text: string, colorName: string, env: NodeJS.ProcessEnv): string {
   if (colorDisabled(env)) return text;
-  const code = COLORS[colorName];
+  const code = SGR_FG[colorName];
   if (!code) return text;
-  return `${code}${text}${RESET_FG}`;
+  return `\x1b[${code}m${text}${RESET_FG}`;
+}
+
+/**
+ * Combine dim (SGR 2) with a baseline color in a single SGR sequence:
+ *   "\x1b[2;{code}m{text}\x1b[22;39m"
+ *
+ * When baseColor is missing/unknown OR colors are disabled (NO_COLOR/TERM=dumb),
+ * fall back to plain `dim()` (which itself returns plain text in NO_COLOR mode).
+ */
+function applyDimColor(text: string, colorName: string | undefined, env: NodeJS.ProcessEnv): string {
+  if (colorDisabled(env)) return text;            // dim() would also return text; short-circuit
+  if (!colorName) return dim(text, env);          // no baseColor → plain dim
+  const code = SGR_FG[colorName];
+  if (!code) return dim(text, env);               // unknown color → plain dim
+  return `\x1b[2;${code}m${text}\x1b[22;39m`;
 }
 
 /** Resolve the glyph mode from config. */
@@ -81,7 +96,10 @@ function renderCell(
   const noColor = colorDisabled(env);
   switch (cell.attention) {
     case "muted":
-      text = dim(text, env);
+      // Per plan section 4.5: muted cells with baseColor combine dim+color
+      // (e.g. done tools → \x1b[2;32m; promptCache → \x1b[2;36m).
+      // Muted cells without baseColor fall through to plain \x1b[2m.
+      text = applyDimColor(text, cell.baseColor, env);
       break;
     case "normal":
       if (!noColor && cell.baseColor) {

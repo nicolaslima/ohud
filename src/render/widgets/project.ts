@@ -44,11 +44,13 @@ export const projectWidget: Widget = {
       const dirty = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty;
       const branchText = ctx.gitStatus.branch + (dirty ? "*" : "");
       const attention = dirty ? "warning" : "normal";
+      const branchLink = remoteUrlToHttp(ctx.gitStatus.remoteUrl);
       cells.push({
         group: "header",
         text: branchText,
         attention,
         baseColor: dirty ? undefined : "green", // warning overrides to yellow; clean uses green
+        link: branchLink,
       });
     }
 
@@ -90,4 +92,35 @@ function condenseModelId(nameOrId: string): string {
   // Replace hyphens-between-digits with dots: "opus-4-7" → "opus-4.7"
   s = s.replace(/(\d)-(\d)/g, "$1.$2").toLowerCase();
   return s;
+}
+
+/** Translate a git remote URL into a browseable HTTP(S) URL.
+ *
+ *   git@github.com:owner/repo.git    → https://github.com/owner/repo
+ *   https://github.com/owner/repo.git → https://github.com/owner/repo
+ *   git@gitlab.com:owner/repo.git    → https://gitlab.com/owner/repo
+ *   https://gitlab.com/owner/repo    → https://gitlab.com/owner/repo
+ *
+ * Returns undefined for URLs that don't match a known host pattern.
+ */
+function remoteUrlToHttp(remoteUrl: string | undefined): string | undefined {
+  if (!remoteUrl) return undefined;
+  const url = remoteUrl.trim();
+  if (!url) return undefined;
+
+  // SSH form: git@host:owner/repo(.git)
+  const sshMatch = /^git@(github\.com|gitlab\.com|bitbucket\.org):(.+?)(?:\.git)?$/.exec(url);
+  if (sshMatch) {
+    const host = sshMatch[1]!;
+    const path = sshMatch[2]!;
+    return `https://${host}/${path}`;
+  }
+
+  // HTTP(S) form for known hosts: strip trailing .git
+  const httpsMatch = /^(https?:\/\/(?:github\.com|gitlab\.com|bitbucket\.org)\/[^?#]+?)(?:\.git)?\/?$/.exec(url);
+  if (httpsMatch) {
+    return httpsMatch[1]!;
+  }
+
+  return undefined;
 }

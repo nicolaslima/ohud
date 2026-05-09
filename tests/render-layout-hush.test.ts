@@ -20,6 +20,7 @@ import { projectWidget } from "../src/render/widgets/project.js";
 import { contextWidget } from "../src/render/widgets/context.js";
 import { toolsWidget } from "../src/render/widgets/tools.js";
 import { agentsWidget } from "../src/render/widgets/agents.js";
+import { promptCacheWidget } from "../src/render/widgets/prompt-cache.js";
 import type { HushCell } from "../src/render/widget.js";
 import type { RenderContext, StdinData } from "../src/types.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
@@ -545,6 +546,105 @@ describe("Agents widget in Hush", () => {
     ctx.config.display.showAgents = true;
     ctx.transcript.agents = [];
     expect(agentsWidget.renderHush!(ctx)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 12: Muted + baseColor combo (dim+color SGR)
+// ---------------------------------------------------------------------------
+
+describe("Muted + baseColor combo", () => {
+  test("done tool cell emits dim+green SGR (\\x1b[2;32m … \\x1b[22;39m)", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showTools = true;
+    ctx.transcript.tools = [
+      { id: "t1", name: "TaskCreate", status: "completed", startTime: new Date(), endTime: new Date() },
+    ];
+    const cells = collectCells([toolsWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const line = lines[0]!;
+    expect(line).toContain("\x1b[2;32m");
+    expect(line).toContain("\x1b[22;39m");
+    // Plain text content still present
+    expect(stripAnsi(line)).toContain("✓ TaskCreate");
+  });
+
+  test("promptCache cell emits dim+cyan SGR (\\x1b[2;36m … \\x1b[22;39m)", () => {
+    const ctx = makeCtx();
+    ctx.config.display.showPromptCache = true;
+    // Set lastAssistantResponseAt 30s ago — well above the 60s minimum freshness threshold
+    // (TTL default is 300s, so remaining ≈ 270s = above 60s). MIN_REMAINING_MS = 60_000.
+    ctx.transcript.lastAssistantResponseAt = new Date(Date.now() - 30_000);
+    const cells = collectCells([promptCacheWidget], ctx);
+    expect(cells.length).toBe(1);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const line = lines[0]!;
+    expect(line).toContain("\x1b[2;36m");
+    expect(line).toContain("\x1b[22;39m");
+    expect(stripAnsi(line)).toContain("cache ");
+  });
+
+  test("muted cell without baseColor renders as plain dim (\\x1b[2m … \\x1b[22m)", () => {
+    // contextWidget at 15% returns attention=muted with NO baseColor
+    const ctx = makeCtx({ stdin: { context_window: { used_percentage: 15 } } });
+    const cells = collectCells([contextWidget], ctx);
+    expect(cells.length).toBe(1);
+    expect(cells[0]!.attention).toBe("muted");
+    expect(cells[0]!.baseColor).toBeUndefined();
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    const line = lines[0]!;
+    // Plain dim wrapping, no color combo
+    expect(line).toContain("\x1b[2m");
+    expect(line).toContain("\x1b[22m");
+    // Should NOT contain combined dim+color sequences
+    expect(line).not.toContain("\x1b[2;");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 13: Branch OSC 8 link from remoteUrl
+// ---------------------------------------------------------------------------
+
+describe("Branch OSC 8 link", () => {
+  test("branch cell emits OSC 8 link when gitStatus.remoteUrl is detectable (https)", () => {
+    const ctx = makeCtx();
+    if (ctx.gitStatus) ctx.gitStatus.remoteUrl = "https://github.com/anthropic/ohud.git";
+    const projectCells = projectWidget.renderHush!(ctx) as HushCell[];
+    const branchCell = projectCells.find((c) => c.text.includes("main"));
+    expect(branchCell).toBeDefined();
+    expect(branchCell!.link).toBe("https://github.com/anthropic/ohud");
+  });
+
+  test("branch cell emits OSC 8 link from SSH-form remoteUrl", () => {
+    const ctx = makeCtx();
+    if (ctx.gitStatus) ctx.gitStatus.remoteUrl = "git@github.com:anthropic/ohud.git";
+    const projectCells = projectWidget.renderHush!(ctx) as HushCell[];
+    const branchCell = projectCells.find((c) => c.text.includes("main"));
+    expect(branchCell!.link).toBe("https://github.com/anthropic/ohud");
+  });
+
+  test("branch cell has no link when remoteUrl is missing", () => {
+    const ctx = makeCtx();
+    // gitStatus has no remoteUrl set
+    const projectCells = projectWidget.renderHush!(ctx) as HushCell[];
+    const branchCell = projectCells.find((c) => c.text.includes("main"));
+    expect(branchCell!.link).toBeUndefined();
+  });
+
+  test("branch cell has no link when remoteUrl is non-host (custom hostname)", () => {
+    const ctx = makeCtx();
+    if (ctx.gitStatus) ctx.gitStatus.remoteUrl = "git@my-internal-host:team/repo.git";
+    const projectCells = projectWidget.renderHush!(ctx) as HushCell[];
+    const branchCell = projectCells.find((c) => c.text.includes("main"));
+    expect(branchCell!.link).toBeUndefined();
+  });
+
+  test("branch link appears in pack output as OSC 8 escape sequence", () => {
+    const ctx = makeCtx();
+    if (ctx.gitStatus) ctx.gitStatus.remoteUrl = "git@github.com:anthropic/ohud.git";
+    const cells = collectCells([projectWidget], ctx);
+    const lines = hushLayout.pack(cells, 200, ctx.config);
+    expect(lines[0]).toContain("\x1b]8;;https://github.com/anthropic/ohud\x07");
   });
 });
 
