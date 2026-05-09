@@ -18,3 +18,17 @@ test("hex color", () => {
 test("unknown color returns plain text", () => {
   expect(color("bogus", "p")).toBe("p");
 });
+
+test("color() returns plain text when NO_COLOR env is set", () => {
+  const orig = process.env.NO_COLOR;
+  process.env.NO_COLOR = "1";
+  try { expect(color("red", "x")).toBe("x"); }
+  finally { if (orig === undefined) delete process.env.NO_COLOR; else process.env.NO_COLOR = orig; }
+});
+
+test("color() returns plain text when TERM is dumb", () => {
+  const orig = process.env.TERM;
+  process.env.TERM = "dumb";
+  try { expect(color("red", "x")).toBe("x"); }
+  finally { if (orig === undefined) delete process.env.TERM; else process.env.TERM = orig; }
+});

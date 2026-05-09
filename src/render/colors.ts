@@ -1,18 +1,18 @@
-// src/render/colors.ts
 export const RESET = "\x1b[0m";
 
 const NAMED: Record<string, string> = {
-  dim: "\x1b[2m",
-  red: "\x1b[31m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  magenta: "\x1b[35m",
-  cyan: "\x1b[36m",
-  brightBlue: "\x1b[94m",
-  brightMagenta: "\x1b[95m",
+  dim: "\x1b[2m", red: "\x1b[31m", green: "\x1b[32m", yellow: "\x1b[33m",
+  magenta: "\x1b[35m", cyan: "\x1b[36m", brightBlue: "\x1b[94m", brightMagenta: "\x1b[95m",
 };
 
+function colorDisabled(): boolean {
+  if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== "") return true;
+  if (process.env.TERM === "dumb") return true;
+  return false;
+}
+
 export function color(spec: string, text: string): string {
+  if (colorDisabled()) return text;
   if (NAMED[spec]) return `${NAMED[spec]}${text}${RESET}`;
   if (/^\d+$/.test(spec)) {
     const n = Number.parseInt(spec, 10);
