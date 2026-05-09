@@ -191,7 +191,7 @@ describe("Active state", () => {
     const lines = hushLayout.pack(cells, 200, ctx.config);
     const activityLine = stripAnsi(lines[1]!);
     // One of the spinner chars should be present
-    const spinnerChars = ["◐", "◓", "◑", "◒"];
+    const spinnerChars = ["◜", "◝", "◞", "◟"];
     const hasSpinner = spinnerChars.some((ch) => activityLine.includes(ch));
     expect(hasSpinner).toBe(true);
   });
@@ -279,7 +279,7 @@ describe("Critical state", () => {
     const cells = collectCells([toolsWidget], ctx);
     const lines = hushLayout.pack(cells, 200, ctx.config);
     const plain = stripAnsi(lines[0]!);
-    const spinnerChars = ["◐", "◓", "◑", "◒"];
+    const spinnerChars = ["◜", "◝", "◞", "◟"];
     const hasSpinner = spinnerChars.some((ch) => plain.includes(ch));
     expect(hasSpinner).toBe(true);
   });
@@ -519,7 +519,7 @@ describe("Spinner determinism in layout", () => {
     const cells = collectCells([toolsWidget], ctx);
     const lines = hushLayout.pack(cells, 200, ctx.config);
     const plain = stripAnsi(lines[0]!);
-    const spinnerChars = ["◐", "◓", "◑", "◒"];
+    const spinnerChars = ["◜", "◝", "◞", "◟"];
     const spinnerFound = spinnerChars.some((ch) => plain.includes(ch));
     expect(spinnerFound).toBe(true);
   });
@@ -530,7 +530,7 @@ describe("Spinner determinism in layout", () => {
     const lines = hushLayout.pack(cells, 200, ctx.config);
     for (const l of lines) {
       const plain = stripAnsi(l);
-      const spinnerChars = ["◐", "◓", "◑", "◒"];
+      const spinnerChars = ["◜", "◝", "◞", "◟"];
       const spinnerFound = spinnerChars.some((ch) => plain.includes(ch));
       expect(spinnerFound).toBe(false);
     }
@@ -552,7 +552,7 @@ describe("Agents widget in Hush", () => {
     const lines = hushLayout.pack(cells, 200, ctx.config);
     const plain = stripAnsi(lines[0]!);
     expect(plain).toContain("Explore");
-    const spinnerChars = ["◐", "◓", "◑", "◒"];
+    const spinnerChars = ["◜", "◝", "◞", "◟"];
     expect(spinnerChars.some((ch) => plain.includes(ch))).toBe(true);
   });
 
@@ -717,8 +717,8 @@ describe("hush.animate toggle", () => {
     const cells = collectCells([toolsWidget], ctx);
     const lines = hushLayout.pack(cells, 200, ctx.config);
     const plain = stripAnsi(lines.join("\n"));
-    // No spinner glyphs (◐ ◓ ◑ ◒ for unicode)
-    expect(plain).not.toMatch(/[◐◓◑◒]/);
+    // No spinner glyphs (◜ ◝ ◞ ◟ — rotating quarter-arcs for unicode)
+    expect(plain).not.toMatch(/[◜◝◞◟]/);
     // But the running tool name still shows
     expect(plain).toContain("Edit");
   });
@@ -737,7 +737,7 @@ describe("hush.animate toggle", () => {
     const cells = collectCells([toolsWidget], ctx);
     const lines = hushLayout.pack(cells, 200, ctx.config);
     const plain = stripAnsi(lines.join("\n"));
-    expect(plain).toMatch(/[◐◓◑◒]/);
+    expect(plain).toMatch(/[◜◝◞◟]/);
   });
 
   test("display.hush.animate=false: cyan baseColor still applied for running tool", () => {
@@ -756,6 +756,26 @@ describe("hush.animate toggle", () => {
     const lines = hushLayout.pack(cells, 200, ctx.config);
     // Cyan SGR is \x1b[36m
     expect(lines.join("\n")).toContain("\x1b[36m");
+  });
+
+  test('motion="still" keeps spinner visible but freezes on frame 0 (◜)', () => {
+    const start = new Date(Date.now() - 5_000);
+    const ctx = makeCtx({
+      transcript: {
+        tools: [{ id: "1", name: "Edit", status: "running", startTime: start }],
+        agents: [],
+        todos: [],
+      },
+    });
+    ctx.config.display.showTools = true;
+    ctx.config.display.hush = { motion: "still" };
+
+    // Render twice across a 2-second gap; with motion=still the spinner glyph
+    // must NOT advance — it stays on frame 0 regardless of wall time.
+    const cells = collectCells([toolsWidget], ctx);
+    const a = stripAnsi(hushLayout.pack(cells, 200, ctx.config).join("\n"));
+    expect(a).toContain("◜");          // frame 0 always
+    expect(a).not.toMatch(/[◝◞◟]/);    // never the other phases
   });
 });
 

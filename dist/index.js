@@ -229,7 +229,7 @@ var DEFAULT_CONFIG = {
     showEffortLevel: true,
     glyphs: "auto",
     layout: "row",
-    hush: { compactWhenIdle: true, hyperlinks: true, animate: true, density: "compact", identityColors: false }
+    hush: { compactWhenIdle: true, hyperlinks: true, animate: true, motion: "subtle", density: "compact", identityColors: false }
   },
   gitStatus: {
     enabled: true,
@@ -299,6 +299,65 @@ async function loadConfig(path) {
     return base;
   }
   return deepMerge(base, parsed);
+}
+
+// src/render/glyphs.ts
+var UNICODE = {
+  bolt: "⚡",
+  clock: "⏱",
+  running: "◐",
+  done: "✓",
+  todo: "▹",
+  active: "▸",
+  sep: "│",
+  barFull: "█",
+  barEmpty: "░",
+  up: "↑",
+  down: "↓"
+};
+var NERD = {
+  done: "",
+  running: "",
+  bolt: "",
+  clock: "",
+  active: ""
+};
+var ASCII = {
+  bolt: "*",
+  clock: "t",
+  running: "o",
+  done: "x",
+  todo: "-",
+  active: ">",
+  sep: "|",
+  barFull: "#",
+  barEmpty: ".",
+  up: "^",
+  down: "v"
+};
+function autoMode() {
+  const lang = process.env.LANG ?? "";
+  if (lang.includes("UTF-8") || lang.toLowerCase().includes("utf8"))
+    return "unicode";
+  if (process.env.LC_ALL?.includes("UTF-8"))
+    return "unicode";
+  return "ascii";
+}
+function glyph(key, mode) {
+  const resolved = mode === "auto" ? autoMode() : mode;
+  if (resolved === "nerd")
+    return NERD[key] ?? UNICODE[key];
+  if (resolved === "ascii")
+    return ASCII[key];
+  return UNICODE[key];
+}
+
+// src/render/spinner.ts
+var UNICODE_FRAMES = ["◜", "◝", "◞", "◟"];
+var ASCII_FRAMES = ["|", "/", "-", "\\"];
+function spinnerFrame(now, mode) {
+  const idx = Math.floor(now / 1000) % 4;
+  return mode === "ascii" ? ASCII_FRAMES[idx] : UNICODE_FRAMES[idx];
 }
 
 // src/doctor.ts
@@ -373,8 +432,18 @@ async function runDoctor(opts) {
   }
   if (activeLayout === "hush") {
     const h = cfg.display.hush ?? {};
-    lines.push(`Hush config: compactWhenIdle=${h.compactWhenIdle ?? true}, hyperlinks=${h.hyperlinks ?? true}, animate=${h.animate ?? true}`);
+    lines.push(`Hush config: compactWhenIdle=${h.compactWhenIdle ?? true}, ` + `hyperlinks=${h.hyperlinks ?? true}, animate=${h.animate ?? true}, ` + `motion=${h.motion ?? "subtle"}, density=${h.density ?? "compact"}`);
+    lines.push(`Activity TTL: running tools dropped after 300s without tool_result; ` + `completed tools fade 30s after endTime.`);
   }
+  lines.push("");
+  lines.push("Glyph test (each row should render as 5 distinct cells):");
+  const sampleKeys = ["running", "done", "active", "bolt", "clock"];
+  const row = (mode) => sampleKeys.map((k) => glyph(k, mode)).join("  ");
+  lines.push(`  nerd   :  ${row("nerd")}    (requires Nerd Font installed)`);
+  lines.push(`  unicode:  ${row("unicode")}    (default for UTF-8 locales)`);
+  lines.push(`  ascii  :  ${row("ascii")}    (fallback)`);
+  const spinnerCycle = [0, 1000, 2000, 3000].map((t) => spinnerFrame(t, "unicode")).join("  ");
+  lines.push(`  spinner cycle: ${spinnerCycle}`);
   const { annotations, warnings } = buildFlagAnnotations(cfg, activeLayout);
   lines.push(`
 active config flags (consumed?):`);
@@ -872,46 +941,6 @@ function color(spec, text) {
   return text;
 }
 
-// src/render/glyphs.ts
-var UNICODE = {
-  bolt: "⚡",
-  clock: "⏱",
-  running: "◐",
-  done: "✓",
-  todo: "▹",
-  active: "▸",
-  sep: "│",
-  barFull: "█",
-  barEmpty: "░",
-  up: "↑",
-  down: "↓"
-};
-var ASCII = {
-  bolt: "*",
-  clock: "t",
-  running: "o",
-  done: "x",
-  todo: "-",
-  active: ">",
-  sep: "|",
-  barFull: "#",
-  barEmpty: ".",
-  up: "^",
-  down: "v"
-};
-function autoMode() {
-  const lang = process.env.LANG ?? "";
-  if (lang.includes("UTF-8") || lang.toLowerCase().includes("utf8"))
-    return "unicode";
-  if (process.env.LC_ALL?.includes("UTF-8"))
-    return "unicode";
-  return "ascii";
-}
-function glyph(key, mode) {
-  const resolved = mode === "auto" ? autoMode() : mode;
-  return resolved === "ascii" ? ASCII[key] : UNICODE[key];
-}
-
 // src/render/path.ts
 function basename(p) {
   const parts = p.split("/").filter(Boolean);
@@ -919,7 +948,18 @@ function basename(p) {
 }
 
 // src/render/width.ts
-var WIDTH_2_GLYPHS = new Set(["⚡", "⏱", "◐", "✓", "▸", "▹"]);
+var WIDTH_2_GLYPHS = new Set([
+  "⚡",
+  "⏱",
+  "◐",
+  "◜",
+  "◝",
+  "◞",
+  "◟",
+  "✓",
+  "▸",
+  "▹"
+]);
 function wcwidth(s) {
   let w = 0;
   for (const ch of s) {
@@ -2099,14 +2139,6 @@ function dim(text, env) {
   return `\x1B[2m${text}\x1B[22m`;
 }
 
-// src/render/spinner.ts
-var UNICODE_FRAMES = ["◐", "◓", "◑", "◒"];
-var ASCII_FRAMES = ["|", "/", "-", "\\"];
-function spinnerFrame(now, mode) {
-  const idx = Math.floor(now / 1000) % 4;
-  return mode === "ascii" ? ASCII_FRAMES[idx] : UNICODE_FRAMES[idx];
-}
-
 // src/render/hyperlink.ts
 function link(text, url, enabled = true) {
   if (!enabled || !url)
@@ -2193,7 +2225,7 @@ function renderCell(cell, now, mode, env, toggles) {
     const secondaryStyled = dim(secondary, env);
     text = `${primaryStyled} ${secondaryStyled}`;
     if (cell.animate === "spinner" && toggles.animate) {
-      const glyph2 = spinnerFrame(now, mode);
+      const glyph2 = spinnerFrame(toggles.motion ? now : 0, mode);
       text = `${glyph2} ${text}`;
     }
     if (cell.link) {
@@ -2203,7 +2235,7 @@ function renderCell(cell, now, mode, env, toggles) {
   }
   text = cell.text;
   if (cell.animate === "spinner" && toggles.animate) {
-    const glyph2 = spinnerFrame(now, mode);
+    const glyph2 = spinnerFrame(toggles.motion ? now : 0, mode);
     text = `${glyph2} ${text}`;
   }
   switch (cell.attention) {
@@ -2320,6 +2352,7 @@ var hushLayout = {
     const toggles = {
       hyperlinks: config.display.hush?.hyperlinks !== false,
       animate: config.display.hush?.animate !== false,
+      motion: config.display.hush?.motion !== "still",
       identityColors: config.display.hush?.identityColors === true
     };
     const headerCells = hushCells.filter((c) => c.group === "header");

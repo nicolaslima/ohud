@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { probeOllama } from "./ollama-probe.js";
 import { loadConfig } from "./config.js";
+import { glyph } from "./render/glyphs.js";
+import { spinnerFrame } from "./render/spinner.js";
 import type { HudConfig } from "./types.js";
 
 // Layout affinity for each display.* flag:
@@ -113,9 +115,31 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
   if (activeLayout === "hush") {
     const h = cfg.display.hush ?? {};
     lines.push(
-      `Hush config: compactWhenIdle=${h.compactWhenIdle ?? true}, hyperlinks=${h.hyperlinks ?? true}, animate=${h.animate ?? true}`,
+      `Hush config: compactWhenIdle=${h.compactWhenIdle ?? true}, ` +
+      `hyperlinks=${h.hyperlinks ?? true}, animate=${h.animate ?? true}, ` +
+      `motion=${h.motion ?? "subtle"}, density=${h.density ?? "compact"}`,
+    );
+    // Inform users why old "running" tools may be invisible: stale entries are
+    // dropped after 5 min, completed entries fade 30 s after their endTime.
+    lines.push(
+      `Activity TTL: running tools dropped after 300s without tool_result; ` +
+      `completed tools fade 30s after endTime.`,
     );
   }
+
+  // Glyph test row — three tiers side-by-side, plus a sample spinner cycle.
+  // Lets the user verify which glyph mode their terminal+font actually supports
+  // before opting into "nerd" via /ohud configure.
+  lines.push("");
+  lines.push("Glyph test (each row should render as 5 distinct cells):");
+  const sampleKeys = ["running", "done", "active", "bolt", "clock"] as const;
+  const row = (mode: "nerd" | "unicode" | "ascii"): string =>
+    sampleKeys.map((k) => glyph(k, mode)).join("  ");
+  lines.push(`  nerd   :  ${row("nerd")}    (requires Nerd Font installed)`);
+  lines.push(`  unicode:  ${row("unicode")}    (default for UTF-8 locales)`);
+  lines.push(`  ascii  :  ${row("ascii")}    (fallback)`);
+  const spinnerCycle = [0, 1000, 2000, 3000].map((t) => spinnerFrame(t, "unicode")).join("  ");
+  lines.push(`  spinner cycle: ${spinnerCycle}`);
 
   const { annotations, warnings } = buildFlagAnnotations(cfg, activeLayout);
 

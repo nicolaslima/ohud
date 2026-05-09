@@ -121,8 +121,10 @@ function resolveSeparators(
 interface HushToggles {
   /** Emit OSC 8 hyperlinks (default true). */
   hyperlinks: boolean;
-  /** Animate spinner glyph for running activity (default true). */
+  /** Whether the spinner glyph is emitted at all (default true). */
   animate: boolean;
+  /** Whether the spinner advances frames across ticks. False keeps it on frame 0 ("still" motion). */
+  motion: boolean;
   /** Show cyan/green/blue identity colors (default false). */
   identityColors: boolean;
 }
@@ -165,9 +167,9 @@ function renderCell(
     }
     const secondaryStyled = dim(secondary, env);
     text = `${primaryStyled} ${secondaryStyled}`;
-    // Apply spinner if needed
+    // Apply spinner if needed; motion=still freezes on frame 0.
     if (cell.animate === "spinner" && toggles.animate) {
-      const glyph = spinnerFrame(now, mode);
+      const glyph = spinnerFrame(toggles.motion ? now : 0, mode);
       text = `${glyph} ${text}`;
     }
     // Wrap in OSC 8 if present
@@ -179,9 +181,10 @@ function renderCell(
 
   text = cell.text;
 
-  // Step 2: prepend spinner glyph for animated cells (gated by hush.animate)
+  // Step 2: prepend spinner glyph for animated cells (gated by hush.animate);
+  // motion=still freezes on frame 0.
   if (cell.animate === "spinner" && toggles.animate) {
-    const glyph = spinnerFrame(now, mode);
+    const glyph = spinnerFrame(toggles.motion ? now : 0, mode);
     text = `${glyph} ${text}`;
   }
 
@@ -380,10 +383,13 @@ export const hushLayout: Layout = {
     const density = config.display.hush?.density ?? "compact";
     const seps = resolveSeparators(density, env);
 
-    // Read user toggles from config; both default to true per plan section 5.
+    // Read user toggles from config; defaults preserve prior behaviour.
+    // `motion === "still"` freezes the spinner on frame 0; "subtle" (or unset)
+    // lets it cycle once per second.
     const toggles: HushToggles = {
       hyperlinks:     config.display.hush?.hyperlinks     !== false,
       animate:        config.display.hush?.animate        !== false,
+      motion:         config.display.hush?.motion         !== "still",
       identityColors: config.display.hush?.identityColors === true,
     };
 

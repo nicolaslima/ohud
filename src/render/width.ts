@@ -1,4 +1,9 @@
-const WIDTH_2_GLYPHS = new Set(["⚡", "⏱", "◐", "✓", "▸", "▹"]);
+const WIDTH_2_GLYPHS = new Set([
+  "⚡", "⏱",
+  "◐",                           // legacy spinner frame (kept for row layout glyphs.ts)
+  "◜", "◝", "◞", "◟",            // arc spinner frames (Hush)
+  "✓", "▸", "▹",
+]);
 
 export function wcwidth(s: string): number {
   let w = 0;

@@ -235,7 +235,7 @@ export interface HudConfig {
     showSpeed: boolean;
     showMemoryUsage: boolean;
     showEffortLevel: boolean;
-    glyphs: "unicode" | "ascii" | "auto";
+    glyphs: "unicode" | "ascii" | "auto" | "nerd";
 
     /** Layout strategy. Default "row" preserves current behavior. */
     layout?: "row" | "hush";
@@ -248,8 +248,16 @@ export interface HudConfig {
       thresholds?: { warning?: number; danger?: number };
       /** Emit OSC 8 hyperlinks on identity widgets. Default true. */
       hyperlinks?: boolean;
-      /** Animate spinner glyph for running activity. Default true. */
+      /** Animate spinner glyph for running activity. Default true.
+       *  Superseded by `motion` when set; kept for backward compatibility. */
       animate?: boolean;
+      /**
+       * Motion budget for animated cells. Statusline runs as a fresh process
+       * per tick, so motion comes from frame variation across ticks — never
+       * sub-tick animation. "still" keeps the spinner glyph at frame 0;
+       * "subtle" cycles the spinner once per second (default).
+       */
+      motion?: "still" | "subtle";
       /** Cell spacing density. Default "compact". */
       density?: "compact" | "comfortable" | "airy";
       /** Show cyan/green/blue identity colors for project/branch/model. Default false (muted). */
