@@ -1,12 +1,36 @@
-// src/render/lines/memory.ts
+// src/render/widgets/memory.ts
+import type { Widget, WidgetCell } from "../widget.js";
+import type { RenderContext } from "../../types.js";
 import { color } from "../colors.js";
 import { glyph } from "../glyphs.js";
 import { barColorForPercent } from "../thresholds.js";
-import type { RenderContext } from "../../types.js";
+import { maxLineWidth } from "./_util.js";
+
+export const memoryWidget: Widget = {
+  id: "memory",
+  group: "metrics",
+  priority: 50,
+  minWidth: 18,
+
+  render(ctx: RenderContext): WidgetCell | null {
+    const body = renderMemory(ctx);
+    if (body == null) return null;
+    return { body, visualWidth: maxLineWidth(body) };
+  },
+
+  // Hidden in Hush mode by user feedback (plan section 4.3)
+  renderHush(_ctx: RenderContext): null {
+    return null;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Row render implementation (moved from src/render/lines/memory.ts)
+// ---------------------------------------------------------------------------
 
 const BAR_WIDTH = 10;
 
-export function renderMemory(ctx: RenderContext): string | null {
+function renderMemory(ctx: RenderContext): string | null {
   if (!ctx.config.display.showMemoryUsage) return null;
   if (ctx.config.lineLayout !== "expanded") return null;
   if (!ctx.memoryInfo) return null;

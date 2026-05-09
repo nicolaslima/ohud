@@ -1,11 +1,35 @@
-// src/render/lines/environment.ts
+// src/render/widgets/environment.ts
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { color } from "../colors.js";
+import type { Widget, WidgetCell } from "../widget.js";
 import type { RenderContext } from "../../types.js";
+import { color } from "../colors.js";
+import { maxLineWidth } from "./_util.js";
 
-export function renderEnvironment(ctx: RenderContext): string | null {
+export const environmentWidget: Widget = {
+  id: "environment",
+  group: "activity",
+  priority: 30,
+  minWidth: 14,
+
+  render(ctx: RenderContext): WidgetCell | null {
+    const body = renderEnvironment(ctx);
+    if (body == null) return null;
+    return { body, visualWidth: maxLineWidth(body) };
+  },
+
+  // Hidden in Hush mode by user feedback (plan section 4.3)
+  renderHush(_ctx: RenderContext): null {
+    return null;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Row render implementation (moved from src/render/lines/environment.ts)
+// ---------------------------------------------------------------------------
+
+function renderEnvironment(ctx: RenderContext): string | null {
   if (!ctx.config.display.showConfigCounts) return null;
   const dir = ctx.stdin.workspace?.current_dir ?? ctx.stdin.cwd;
   if (!dir) return null;

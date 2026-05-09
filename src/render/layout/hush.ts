@@ -1,0 +1,187 @@
+// src/render/layout/hush.ts
+//
+// HushLayout — Pure-inspired minimal statusline.
+//
+// Three operational principles:
+// 1. Conditional bracket suppression — null cells AND their separators vanish.
+// 2. Contextual dimming — dim by default; full color only when threshold crossed.
+// 3. Compact-when-idle — single line when no activity; 2 lines when busy.
+//
+// Cell rendering pipeline (per non-null HushCell):
+//   1. Start with plain `text`.
+//   2. Prepend spinner glyph if animate === "spinner".
+//   3. Apply ANSI color based on attention + baseColor.
+//   4. Wrap in OSC 8 hyperlink if link is non-empty.
+//
+// Separator between cells: two spaces ("  ").
+
+import type { WidgetCell, HushCell } from "../widget.js";
+import type { Layout } from "./index.js";
+import type { HudConfig } from "../../types.js";
+import { isColorDisabled } from "../colors.js";
+import { dim } from "../dim.js";
+import { spinnerFrame } from "../spinner.js";
+import { link as osc8 } from "../hyperlink.js";
+import { truncateLine } from "../width.js";
+
+const SEP = "  ";
+
+// SGR digit codes for baseline palette (used for both standalone and dim+color combos).
+const SGR_FG: Record<string, string> = {
+  cyan:    "36",
+  green:   "32",
+  blue:    "34",
+  magenta: "35",
+  yellow:  "33",
+  red:     "31",
+};
+
+const RESET_FG = "\x1b[39m";
+
+function applyColor(text: string, colorName: string, env: NodeJS.ProcessEnv): string {
+  if (isColorDisabled(env)) return text;
+  const code = SGR_FG[colorName];
+  if (!code) return text;
+  return `\x1b[${code}m${text}${RESET_FG}`;
+}
+
+/**
+ * Combine dim (SGR 2) with a baseline color in a single SGR sequence:
+ *   "\x1b[2;{code}m{text}\x1b[22;39m"
+ *
+ * When baseColor is missing/unknown OR colors are disabled (NO_COLOR/TERM=dumb),
+ * fall back to plain `dim()` (which itself returns plain text in NO_COLOR mode).
+ */
+function applyDimColor(text: string, colorName: string | undefined, env: NodeJS.ProcessEnv): string {
+  if (isColorDisabled(env)) return text;          // dim() would also return text; short-circuit
+  if (!colorName) return dim(text, env);          // no baseColor → plain dim
+  const code = SGR_FG[colorName];
+  if (!code) return dim(text, env);               // unknown color → plain dim
+  return `\x1b[2;${code}m${text}\x1b[22;39m`;
+}
+
+/**
+ * Resolve the glyph mode from config, using the provided env for LANG/LC_ALL.
+ * Accepts an optional `env` param so callers can inject a custom environment
+ * for testing (avoids direct reads of `process.env` inside the function).
+ */
+export function glyphMode(config: HudConfig, env?: NodeJS.ProcessEnv): "unicode" | "ascii" {
+  const g = config.display.glyphs;
+  if (g === "unicode") return "unicode";
+  if (g === "ascii") return "ascii";
+  // "auto" — check LANG/LC_ALL from the provided env (or process.env as fallback)
+  const e = env ?? process.env;
+  const lang = e.LANG ?? "";
+  if (lang.includes("UTF-8") || lang.toLowerCase().includes("utf8")) return "unicode";
+  if (e.LC_ALL?.includes("UTF-8")) return "unicode";
+  return "ascii";
+}
+
+/** Toggles read once per pack() call, sourced from `config.display.hush.*`. */
+interface HushToggles {
+  /** Emit OSC 8 hyperlinks (default true). */
+  hyperlinks: boolean;
+  /** Animate spinner glyph for running activity (default true). */
+  animate: boolean;
+}
+
+/** Render a single HushCell to a styled string. */
+function renderCell(
+  cell: HushCell,
+  now: number,
+  mode: "unicode" | "ascii",
+  env: NodeJS.ProcessEnv,
+  toggles: HushToggles,
+): string {
+  let text = cell.text;
+
+  // Step 2: prepend spinner glyph for animated cells (gated by hush.animate)
+  if (cell.animate === "spinner" && toggles.animate) {
+    const glyph = spinnerFrame(now, mode);
+    text = `${glyph} ${text}`;
+  }
+
+  // Step 3: apply ANSI color by attention level
+  const noColor = isColorDisabled(env);
+  switch (cell.attention) {
+    case "muted":
+      // Per plan section 4.5: muted cells with baseColor combine dim+color
+      // (e.g. done tools → \x1b[2;32m; promptCache → \x1b[2;36m).
+      // Muted cells without baseColor fall through to plain \x1b[2m.
+      text = applyDimColor(text, cell.baseColor, env);
+      break;
+    case "normal":
+      if (!noColor && cell.baseColor) {
+        text = applyColor(text, cell.baseColor, env);
+      }
+      break;
+    case "warning":
+      if (!noColor) text = `\x1b[33m${text}${RESET_FG}`;
+      break;
+    case "danger":
+      if (!noColor) text = `\x1b[31m${text}${RESET_FG}`;
+      break;
+  }
+
+  // Step 4: wrap in OSC 8 hyperlink if present (links are metadata, not color).
+  // Gated by hush.hyperlinks for terminals that mishandle OSC 8.
+  if (cell.link) {
+    text = osc8(text, cell.link, toggles.hyperlinks);
+  }
+
+  return text;
+}
+
+export const hushLayout: Layout = {
+  name: "hush",
+
+  pack(
+    cells: (WidgetCell | HushCell)[],
+    termWidth: number,
+    config: HudConfig,
+  ): string[] {
+    // Only handle HushCell instances — skip WidgetCells (shouldn't appear in hush mode).
+    const hushCells = cells.filter((c): c is HushCell => "text" in c && "attention" in c);
+
+    const now = Date.now();
+    const env = process.env;
+    const mode = glyphMode(config, env);
+
+    // Read user toggles from config; both default to true per plan section 5.
+    const toggles: HushToggles = {
+      hyperlinks: config.display.hush?.hyperlinks !== false,
+      animate:    config.display.hush?.animate    !== false,
+    };
+
+    // Partition into groups
+    const headerCells   = hushCells.filter((c) => c.group === "header");
+    const metricsCells  = hushCells.filter((c) => c.group === "metrics");
+    const activityCells = hushCells.filter((c) => c.group === "activity");
+
+    // Build line 1: header + metrics joined with SEP
+    const line1Parts = [...headerCells, ...metricsCells].map((c) =>
+      renderCell(c, now, mode, env, toggles),
+    );
+    const line1 = line1Parts.join(SEP);
+
+    // Build line 2: activity cells
+    const line2Parts = activityCells.map((c) => renderCell(c, now, mode, env, toggles));
+    const line2 = line2Parts.join(SEP);
+
+    const lines: string[] = [];
+    if (line1) lines.push(truncateLine(line1, termWidth));
+
+    // compactWhenIdle: if no activity, omit line 2 (default true)
+    // When compactWhenIdle is explicitly false, always emit line 2.
+    const compactWhenIdle = config.display.hush?.compactWhenIdle !== false; // default true
+
+    if (compactWhenIdle) {
+      if (line2) lines.push(truncateLine(line2, termWidth));
+    } else {
+      // Always emit line 2 even if empty
+      lines.push(truncateLine(line2, termWidth));
+    }
+
+    return lines;
+  },
+};

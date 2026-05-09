@@ -1,6 +1,6 @@
-# How-To: Add a New Line Module
+# How-To: Add a New Widget
 
-> **Diátaxis: How-To.** Tarefa: criar um 13º renderer (além dos 12 atuais documentados em [reference/line-modules.md](../reference/line-modules.md)). Receita end-to-end com TypeScript, testes, e wiring.
+> **Diátaxis: How-To.** Tarefa: criar um 13º widget (além dos 12 atuais documentados em [reference/widgets.md](../reference/widgets.md)). Receita end-to-end com TypeScript, testes, e wiring.
 
 Esta página assume que você já clonou o repo e roda `bun test`. Se ainda não:
 
@@ -24,21 +24,33 @@ Pergunte:
 
 Vamos usar um exemplo concreto: **mostrar a versão do Node/Bun em uso** (`process.version` + `process.argv0`). Útil para sanity-check em sessões com múltiplos runtimes.
 
-## Passo 1 — Criar o renderer
+## Passo 1 — Criar o widget
 
-Arquivo: `src/render/lines/runtime.ts`
+Arquivo: `src/render/widgets/runtime.ts`
+
+O widget implementa a interface `Widget` (`src/render/widget.ts`). O método `render()` produz output Row (ANSI completo). O método `renderHush()` (opcional) produz um `HushCell` plain-text para o layout Hush.
 
 ```ts
-import { color } from "../colors.js";
+import type { Widget, WidgetCell } from "../widget.js";
 import type { RenderContext } from "../../types.js";
+import { color } from "../colors.js";
+import { maxLineWidth } from "./_util.js";
 
-export function renderRuntime(ctx: RenderContext): string | null {
-  if (!ctx.config.display.showRuntime) return null;
-  const c = ctx.config.colors;
-  const ver = process.version;
-  const argv0 = process.argv0;
-  return `${color(c.label, "runtime")} ${color(c.label, `${argv0} ${ver}`)}`;
-}
+export const runtimeWidget: Widget = {
+  id: "runtime",
+  group: "metrics",
+  priority: 35,   // lower than duration (40), above environment (30)
+  minWidth: 14,
+
+  render(ctx: RenderContext): WidgetCell | null {
+    if (!ctx.config.display.showRuntime) return null;
+    const c = ctx.config.colors;
+    const ver = process.version;
+    const argv0 = process.argv0;
+    const body = `${color(c.label, "runtime")} ${color(c.label, `${argv0} ${ver}`)}`;
+    return { body, visualWidth: maxLineWidth(body) };
+  },
+};
 ```
 
 `★ Padrão:` early-return em `null` para fail-soft. Nunca lance exception — caller já tem catch genérico mas null é mais barato.
@@ -66,23 +78,20 @@ export const DEFAULT_CONFIG: HudConfig = {
 };
 ```
 
-## Passo 3 — Wiring no orquestrador
+## Passo 3 — Registrar no widget registry
 
-`src/render/index.ts` chama renderers por nome via `elementOrder`. Adicione:
+`src/render/widgets/index.ts` mantém o array `WIDGETS`. Adicione:
 
 ```ts
-import { renderRuntime } from "./lines/runtime.js";
+import { runtimeWidget } from "./runtime.js";
 
-// dentro de composeOutput / collectLines:
-const RENDERERS: Record<string, (ctx: RenderContext) => string | null> = {
-  project: renderProject,
-  context: renderContext,
+export const WIDGETS: readonly Widget[] = [
   // ... existentes ...
-  runtime: renderRuntime,  // ← novo
-};
+  runtimeWidget,   // ← novo
+];
 ```
 
-Adicione `"runtime"` ao default `elementOrder` em `src/types.ts:DEFAULT_CONFIG.elementOrder`:
+Adicione `"runtime"` ao default `elementOrder` em `src/config.ts:DEFAULT_CONFIG.elementOrder`:
 
 ```ts
 elementOrder: [
@@ -110,36 +119,45 @@ Sem isso, doctor vai mostrar sua flag nova como `DEAD FLAG` mesmo funcionando �
 
 ## Passo 5 — Escrever o teste
 
-Crie `tests/render/lines/runtime.test.ts`:
+Crie `tests/render-widget-runtime.test.ts`. Use `widget.render(ctx)` (Option a — sem API surface extra):
 
 ```ts
-import { describe, it, expect } from "bun:test";
-import { renderRuntime } from "../../../src/render/lines/runtime.js";
-import { mockRenderContext } from "../../helpers/render.js";
+import { test, expect } from "bun:test";
+import { runtimeWidget } from "../src/render/widgets/runtime.js";
+import { DEFAULT_CONFIG } from "../src/config.js";
+import type { RenderContext } from "../src/types.js";
 
-describe("renderRuntime", () => {
-  it("returns null when flag is off", () => {
-    const ctx = mockRenderContext({
-      config: { display: { showRuntime: false } },
-    });
-    expect(renderRuntime(ctx)).toBeNull();
-  });
+function makeCtx(): RenderContext {
+  return {
+    mode: "anthropic",
+    stdin: {},
+    transcript: { tools: [], agents: [], todos: [] },
+    gitStatus: null,
+    config: structuredClone(DEFAULT_CONFIG),
+    usageData: null, costData: null, memoryInfo: null, cloudModels: [],
+  };
+}
 
-  it("renders runtime info when flag is on", () => {
-    const ctx = mockRenderContext({
-      config: { display: { showRuntime: true } },
-    });
-    const out = renderRuntime(ctx);
-    expect(out).toContain("runtime");
-    expect(out).toContain(process.version);
-  });
+test("runtimeWidget.render returns null when showRuntime is off", () => {
+  const ctx = makeCtx();
+  // showRuntime defaults to false
+  expect(runtimeWidget.render(ctx)).toBeNull();
+});
+
+test("runtimeWidget.render includes version when flag is on", () => {
+  const ctx = makeCtx();
+  (ctx.config.display as Record<string, unknown>).showRuntime = true;
+  const cell = runtimeWidget.render(ctx);
+  expect(cell).not.toBeNull();
+  expect(cell!.body).toContain("runtime");
+  expect(cell!.body).toContain(process.version);
 });
 ```
 
 Rode:
 
 ```bash
-bun test tests/render/lines/runtime.test.ts
+bun test tests/render-widget-runtime.test.ts
 ```
 
 Os 2 testes devem passar.
@@ -180,9 +198,9 @@ Se `dist/` não está sendo commitado, CI falha. Ver [explanation/design-decisio
 
 A documentação não é opcional. Atualize:
 
-1. **`docs/reference/line-modules.md`** — adicione uma entrada com fonte stdin, flag, exemplo.
+1. **`docs/reference/widgets.md`** — adicione uma linha na tabela de resumo e uma seção completa com id, group, priority, minWidth, Row render, Hush render.
 2. **`docs/reference/config-schema.md`** — linha na tabela de `display.*`.
-3. **`docs/explanation/architecture.md`** se o módulo introduziu um padrão arquitetural novo (raro).
+3. **`docs/explanation/architecture.md`** se o widget introduziu um padrão arquitetural novo (raro).
 
 Sem update da reference, usuários não sabem que a flag existe — ela vira dead-flag-by-omission.
 
@@ -191,14 +209,14 @@ Sem update da reference, usuários não sabem que a flag existe — ela vira dea
 ```mermaid
 flowchart TD
     s1[1. Decidir<br/>fonte + modo + default]
-    s2[2. Criar<br/>src/render/lines/X.ts]
+    s2[2. Criar<br/>src/render/widgets/X.ts]
     s3[3. Adicionar<br/>flag em HudConfig]
-    s4[4. Wirar em<br/>render/index.ts<br/>+ elementOrder]
+    s4[4. Registrar em<br/>src/render/widgets/index.ts<br/>+ elementOrder]
     s5[5. Adicionar a<br/>CONSUMED_FLAGS<br/>em doctor.ts]
-    s6[6. Escrever testes<br/>tests/render/lines/X.test.ts]
+    s6[6. Escrever testes<br/>tests/render-widget-X.test.ts]
     s7[7. Verificar custo<br/>via OHUD_PROFILE=1]
     s8[8. bun run build<br/>commit dist/]
-    s9[9. Atualizar<br/>reference/line-modules.md<br/>reference/config-schema.md]
+    s9[9. Atualizar<br/>reference/widgets.md<br/>reference/config-schema.md]
     s1 --> s2 --> s3 --> s4 --> s5 --> s6 --> s7 --> s8 --> s9
 ```
 
@@ -214,7 +232,7 @@ flowchart TD
 
 ## See also
 
-- [reference/line-modules.md](../reference/line-modules.md) — catálogo completo dos 12 atuais.
+- [reference/widgets.md](../reference/widgets.md) — catálogo completo dos 12 widgets atuais.
 - [reference/config-schema.md](../reference/config-schema.md) — onde adicionar a flag.
-- [explanation/architecture.md](../explanation/architecture.md) — `RenderContext` shape.
+- [explanation/architecture.md](../explanation/architecture.md) — `RenderContext` shape + Layout strategies.
 - [explanation/design-decisions.md](../explanation/design-decisions.md#zero-runtime-dependencies) — invariantes a preservar.

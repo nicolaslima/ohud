@@ -222,7 +222,7 @@ Curioso de onde vem cada número?
 | `◐ Read` | parsed do transcript JSONL — tools em `running` state |
 | `▸ todo` | parsed do transcript — TodoWrite blocks |
 
-Cada linha tem seu próprio módulo em `src/render/lines/`. Catálogo completo: [reference/line-modules.md](../reference/line-modules.md).
+Cada linha tem seu próprio módulo em `src/render/widgets/`. Catálogo completo: [reference/widgets.md](../reference/widgets.md).
 
 ## Passo 9 — Quebrar e consertar
 
@@ -282,7 +282,7 @@ Você sabe agora:
 |---|---|
 | Referência completa de configuração | [reference/config-schema.md](../reference/config-schema.md) |
 | Referência completa de slash commands | [reference/slash-commands.md](../reference/slash-commands.md) |
-| Saber o que cada linha mostra | [reference/line-modules.md](../reference/line-modules.md) |
+| Saber o que cada linha mostra | [reference/widgets.md](../reference/widgets.md) |
 | Diagnosticar problemas | [how-to/diagnose-blank-statusline.md](../how-to/diagnose-blank-statusline.md) |
 | Habilitar Ollama mode | [how-to/enable-ollama-cloud-mode.md](../how-to/enable-ollama-cloud-mode.md) |
 | Trabalhar em CI / terminais restritos | [how-to/work-in-restricted-terminals.md](../how-to/work-in-restricted-terminals.md) |

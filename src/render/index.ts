@@ -1,88 +1,52 @@
 // src/render/index.ts
 import { color } from "./colors.js";
-import { glyph } from "./glyphs.js";
 import type { RenderContext } from "../types.js";
-import { renderProject } from "./lines/project.js";
-import { renderContext } from "./lines/context.js";
-import { renderApiTime } from "./lines/api-time.js";
-import { renderUsage } from "./lines/usage.js";
-import { renderCost } from "./lines/cost.js";
-import { renderPromptCache } from "./lines/prompt-cache.js";
-import { renderTools } from "./lines/tools.js";
-import { renderAgents } from "./lines/agents.js";
-import { renderTodos } from "./lines/todos.js";
-import { renderEnvironment } from "./lines/environment.js";
-import { renderMemory } from "./lines/memory.js";
-import { renderDuration } from "./lines/duration.js";
-import { detectTerminalWidth, truncateLine } from "./width.js";
+import type { WidgetCell, HushCell } from "./widget.js";
+import { visibleWidgets } from "./widgets/index.js";
+import { LAYOUTS, type LayoutName } from "./layout/index.js";
+import { detectTerminalWidth } from "./width.js";
 
-type LineFn = (ctx: RenderContext) => string | null;
-
-const LINE_REGISTRY: Record<string, LineFn> = {
-  project: renderProject,
-  context: renderContext,
-  apiTime: renderApiTime,
-  usage: renderUsage,
-  cost: renderCost,
-  promptCache: renderPromptCache,
-  tools: renderTools,
-  agents: renderAgents,
-  todos: renderTodos,
-  environment: renderEnvironment,
-  memory: renderMemory,
-  duration: renderDuration,
-};
+/** Runtime narrowing: a config file's `display.layout` is structurally `string`
+ *  at parse time (JSON has no enum), so the TS-level `"row" | "hush"` typing
+ *  isn't enough. This guard catches malformed values like `"tracks"` and lets
+ *  us fall back to RowLayout deterministically. */
+function isValidLayout(name: string): name is LayoutName {
+  return name === "row" || name === "hush";
+}
 
 export function render(ctx: RenderContext): string {
-  const order = ctx.config.elementOrder;
-  const lines: string[] = [];
+  const widgets = visibleWidgets(ctx.config);
 
-  // Line 1: project
-  if (order.includes("project")) {
-    const p = renderProject(ctx);
-    if (p) pushLines(lines, p);
-  }
+  // Read layout dynamically from config (added in Task C). Bad/unknown values
+  // resolve to "row" via runtime narrowing, NOT via the type system (a user
+  // with an out-of-date schema in their config.json must not crash the bundle).
+  const rawLayout = ctx.config.display.layout;
+  const layoutName: LayoutName =
+    typeof rawLayout === "string" && isValidLayout(rawLayout) ? rawLayout : "row";
+  const layout = LAYOUTS[layoutName];
+  const termWidth = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
 
-  // Line 2: context (left) merged with apiTime|usage (right) per mergeGroups
-  const merged = collectMerged(ctx);
-  if (merged) pushLines(lines, merged);
+  // Render each widget to cells, choosing hush render path when appropriate.
+  // renderHush() may return a HushCell array (e.g. project emits name+branch+model
+  // as separate sub-cells). Flatten all results into a single cells array.
+  const cells = widgets
+    .flatMap((w): (WidgetCell | HushCell)[] => {
+      if (layoutName === "hush" && w.renderHush) {
+        const c = w.renderHush(ctx);
+        if (!c) return [];
+        const arr = Array.isArray(c) ? c : [c];
+        return arr.map((cell) => ({ ...cell, id: w.id, group: w.group }));
+      }
+      const c = w.render(ctx);
+      return c ? [{ ...c, id: w.id, group: w.group }] : [];
+    });
 
-  // Subsequent lines: in elementOrder, skipping already-rendered ones
-  const rendered = new Set<string>(["project", "context", "apiTime", "usage"]);
-  for (const key of order) {
-    if (rendered.has(key)) continue;
-    const fn = LINE_REGISTRY[key];
-    if (!fn) continue;
-    const out = fn(ctx);
-    if (out) pushLines(lines, out);
-    rendered.add(key);
-  }
-
-  const max = ctx.config.maxWidth ?? detectTerminalWidth(process.env, 120);
-  const truncated = lines.map((l) => truncateLine(l, max));
+  const outputLines = layout.pack(cells, termWidth, ctx.config);
 
   // Fallback: if no content, return minimum sentinel
-  if (truncated.length === 0 || truncated.every((l) => l.trim() === "")) {
+  if (outputLines.length === 0 || outputLines.every((l) => l.trim() === "")) {
     return color(ctx.config.colors.label, "ohud");
   }
-  return truncated.join("\n");
-}
 
-// Split renderer output on `\n` so any line module can return multi-line strings
-// (e.g. agents with 2+ running entries — see `src/render/lines/agents.ts`).
-// Empty lines are filtered. Truncation downstream stays per-line.
-function pushLines(lines: string[], out: string): void {
-  for (const ln of out.split("\n")) {
-    if (ln.length > 0) lines.push(ln);
-  }
-}
-
-function collectMerged(ctx: RenderContext): string | null {
-  const ctxLine = renderContext(ctx);
-  const right = ctx.mode === "ollama" ? renderApiTime(ctx) : renderUsage(ctx);
-  if (ctxLine && right) {
-    const sep = color(ctx.config.colors.label, glyph("sep", ctx.config.display.glyphs));
-    return `${ctxLine} ${sep} ${right}`;
-  }
-  return ctxLine ?? right ?? null;
+  return outputLines.join("\n");
 }

@@ -34,7 +34,32 @@ Restart Claude Code. The HUD appears below every assistant message.
 > **Then:** `/ohud configure` to pick a preset (Full / Essential / Minimal).
 > `/ohud doctor` if anything looks off.
 
-## 👀 What it looks like
+## 🎨 Layouts
+
+ohud ships two layout engines, switchable via `/ohud configure`:
+
+**Row** (default) — full ANSI output with bar charts, pipes, and all widgets visible. Verbose and information-dense.
+
+**Hush** — Pure-inspired minimalist. Dims secondary info, suppresses empty segments, collapses to one line when idle. Three states:
+
+```
+# Idle — single line, project + model + dim context
+ohud  main  opus-4.7  15%
+
+# Active — two lines, warning context, animated tools
+ohud  main*  opus-4.7  68%
+◑ Edit ×4   ◑ Read ×2
+
+# Critical — two lines, danger context, done tools dimmed
+ohud  main*  opus-4.7  92%
+◑ Edit ×4   ✓ Search ×10
+```
+
+Switch with `/ohud configure` or set `display.layout: "hush"` in `~/.claude/plugins/ohud/config.json`. See [docs/explanation/hush-philosophy.md](docs/explanation/hush-philosophy.md) for the design rationale and [docs/how-to/customize-layout.md](docs/how-to/customize-layout.md) for recipes.
+
+<!-- TODO: replace with PNG screenshot: docs/_assets/hush-3-states.png -->
+
+## 👀 What it looks like (Row mode)
 
 ```
 [glm-5:cloud ⚡ 1T] │ ohud │ git:(main *↑3 ↓1) │ effort:max
@@ -83,7 +108,7 @@ Documentation follows the [Diátaxis](https://diataxis.fr/) methodology — pick
 |---|---|
 | 🟢 Just installed, walk me through it | [Tutorial: Getting Started](docs/tutorials/getting-started.md) |
 | 🛠 I have a specific problem | [How-To Guides](docs/how-to/) (5 recipes) |
-| 📚 What does flag X do? | [Reference](docs/reference/) (config, env vars, stdin, line modules, slash commands) |
+| 📚 What does flag X do? | [Reference](docs/reference/) (config, env vars, stdin, widgets, slash commands) |
 | 💡 Why is it shaped this way? | [Explanation](docs/explanation/) (architecture, design decisions, 300ms budget) |
 
 Full index: [`docs/README.md`](docs/README.md).
@@ -92,7 +117,7 @@ Full index: [`docs/README.md`](docs/README.md).
 
 - **Configuration**: [docs/reference/config-schema.md](docs/reference/config-schema.md)
 - **Slash commands**: [docs/reference/slash-commands.md](docs/reference/slash-commands.md)
-- **All 12 line modules**: [docs/reference/line-modules.md](docs/reference/line-modules.md)
+- **All 12 widgets**: [docs/reference/widgets.md](docs/reference/widgets.md)
 - **Customize colors**: [docs/how-to/customize-colors-and-glyphs.md](docs/how-to/customize-colors-and-glyphs.md)
 - **Diagnose problems**: [docs/how-to/diagnose-blank-statusline.md](docs/how-to/diagnose-blank-statusline.md)
 

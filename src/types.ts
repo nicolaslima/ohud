@@ -172,6 +172,9 @@ export interface GitStatus {
   dirty: boolean;
   ahead: number;
   behind: number;
+  /** Optional remote URL (origin) — populated when `git config --get remote.origin.url` succeeds.
+   *  Surface-level field used by HushLayout to emit OSC 8 hyperlinks on the branch cell. */
+  remoteUrl?: string;
 }
 
 // === Memory (opt-in) ===
@@ -233,6 +236,21 @@ export interface HudConfig {
     showMemoryUsage: boolean;
     showEffortLevel: boolean;
     glyphs: "unicode" | "ascii" | "auto";
+
+    /** Layout strategy. Default "row" preserves current behavior. */
+    layout?: "row" | "hush";
+
+    /** Hush layout configuration. Ignored when layout !== "hush". */
+    hush?: {
+      /** Collapse to single line when no activity. Default true. */
+      compactWhenIdle?: boolean;
+      /** Override percent thresholds. Defaults to warningThreshold/criticalThreshold. */
+      thresholds?: { warning?: number; danger?: number };
+      /** Emit OSC 8 hyperlinks on identity widgets. Default true. */
+      hyperlinks?: boolean;
+      /** Animate spinner glyph for running activity. Default true. */
+      animate?: boolean;
+    };
   };
   gitStatus: {
     enabled: boolean;

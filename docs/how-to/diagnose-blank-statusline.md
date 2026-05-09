@@ -203,7 +203,7 @@ Se seu modelo é Ollama mas **não** termina `:cloud` e **não** está em `cloud
 
 ## Passo 5: Uma linha específica não aparece
 
-A causa quase sempre é flag `false`. Cada line module tem uma flag em `display.*` (ver [reference/line-modules.md](../reference/line-modules.md)).
+A causa quase sempre é flag `false`. Cada line module tem uma flag em `display.*` (ver [reference/widgets.md](../reference/widgets.md)).
 
 ### Ative todas para debugar
 
@@ -235,7 +235,7 @@ Escolha preset **Full**. Equivale a ligar todos os `show*`.
 
 ### Linha aparece mas vazia / sem dados
 
-Pode ser que o stdin não tem o campo necessário. Cross-reference com [reference/line-modules.md](../reference/line-modules.md) — coluna "Fonte primária".
+Pode ser que o stdin não tem o campo necessário. Cross-reference com [reference/widgets.md](../reference/widgets.md) — coluna "Fonte primária".
 
 Exemplos comuns:
 

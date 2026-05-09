@@ -60,6 +60,39 @@ echo '{"session_id":"preview","transcript_path":"'"$LATEST"'","model":{"id":"glm
 
 Show the rendered output to the user. The preview now reflects toggles that depend on transcript data (tools, todos, agents, prompt-cache) — not fake numbers.
 
-## Step 5: Save and exit
+## Step 5: Pick a layout style
+
+Use AskUserQuestion to ask the user to choose a layout strategy:
+
+- **Row** (default) — the current statusline format. Multiple labeled segments, bars, cost, memory. Zero config changes needed.
+- **Hush** — Pure-inspired minimal layout. Single line most of the time; expands to 2 lines only when tools/agents are active. No bars, no cost, no memory. Animated spinner, baseline colors, OSC 8 hyperlinks. Recommended for uncluttered terminals.
+
+**IMPORTANT — preserve sub-fields.** The commands below only mutate `display.layout`. They MUST NOT touch `display.hush.{compactWhenIdle, hyperlinks, animate, thresholds}` because those are independent toggles a user may have customized in a previous run. Using `jq '.display.layout = "..."'` (assignment to a single path) is non-destructive — it leaves `display.hush.*` and every other sibling untouched.
+
+When the user selects **Row**, write `"layout": "row"` to `~/.claude/plugins/ohud/config.json`:
+
+```bash
+# Sets display.layout="row" without touching any other key, including display.hush.*
+jq '.display.layout = "row"' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+```
+
+When the user selects **Hush**, write `"layout": "hush"` to `~/.claude/plugins/ohud/config.json` AND set `statusLine.refreshInterval: 1` in `~/.claude/settings.json` so the spinner can animate at 1 Hz (the default Claude Code statusline only fires on events; without `refreshInterval`, the spinner is static between events):
+
+```bash
+# Sets display.layout="hush" without touching any other key, including display.hush.*
+# (a user's prior compactWhenIdle/hyperlinks/animate overrides survive this write).
+jq '.display.layout = "hush"' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+
+# Non-destructively merge refreshInterval into Claude Code settings
+SETTINGS="$HOME/.claude/settings.json"
+test -f "$SETTINGS" || echo '{}' > "$SETTINGS"
+jq '.statusLine.refreshInterval = 1' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+```
+
+Verify preservation: re-run `cat "$CFG" | jq '.display'` after the write — any pre-existing `display.hush.*` keys should still be present, and only `display.layout` should have changed. If you ever need to RESET hush sub-fields, do it explicitly via a separate `jq` command (e.g. `jq 'del(.display.hush)'`); never bundle that with the layout switch.
+
+Show a layout preview using the selected layout by passing `"display":{"layout":"hush"}` or `"display":{"layout":"row"}` in the sample stdin if the bundle supports it, or simply by informing the user which output mode is now active.
+
+## Step 6: Save and exit
 
 If they confirm, the file is already written. Tell them to restart Claude Code or wait for the next status update for changes to take effect.

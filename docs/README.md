@@ -49,7 +49,7 @@ Information-oriented. Look things up.
 - **[Slash commands](reference/slash-commands.md)** — `/ohud setup`, `/ohud configure`, `/ohud doctor`.
 - **[Environment variables](reference/environment-variables.md)** — `NO_COLOR`, `OHUD_PROFILE`, `LANG`, etc.
 - **[Stdin contract](reference/stdin-contract.md)** — JSON shape ohud expects from Claude Code.
-- **[Line modules catalog](reference/line-modules.md)** — all 12 renderers and their outputs.
+- **[Widget catalog](reference/widgets.md)** — all 12 renderers and their outputs.
 
 ## 💡 Explanation — *I want to understand the why*
 

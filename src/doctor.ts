@@ -14,13 +14,14 @@ import type { HudConfig } from "./types.js";
 // (Use broader pattern "\.display\." to catch ctx.config.display.* as well.)
 // This Set will need updating after Tasks 7 (delete dead config) and 8 (implement Pilha A).
 const CONSUMED_FLAGS = new Set([
-  // Display flags read by render/lines/*.ts or src/index.ts orchestrator
+  // Display flags read by src/render/widgets/*.ts or src/render/index.ts orchestrator
   "showModel", "showContextBar", "contextValue", "showApiTime", "showUsage",
   "usageBarEnabled", "usageCompact", "showResetLabel", "timeFormat", "sevenDayThreshold",
   "externalUsagePath", "externalUsageFreshnessMs", "showCost", "showPromptCache",
   "promptCacheTtlSeconds", "showTools", "showAgents", "showTodos", "showConfigCounts",
   "showDuration", "showSpeed", "showMemoryUsage", "showEffortLevel", "glyphs",
-  // GitStatus flags read by render/lines/project.ts
+  "layout", "hush",
+  // GitStatus flags read by src/render/widgets/project.ts
   "showAheadBehind", "pushWarningThreshold", "pushCriticalThreshold",
 ]);
 
@@ -50,6 +51,28 @@ export async function runDoctor(opts: DoctorOpts): Promise<string> {
   lines.push(`probe: live (cache bypassed) — daemonOk: ${probe.daemonOk ? "yes" : "no"}`);
   lines.push(`cloud models: ${probe.cloudModels.map((m) => m.name).join(", ") || "(none)"}`);
   lines.push(`mode: ${(probe.daemonOk && probe.cloudModels.length > 0) ? "ollama-capable" : "anthropic"}`);
+
+  // Task C additions: active layout and mode resolution transparency.
+  const activeLayout = cfg.display.layout ?? "row";
+  lines.push(`Active layout: ${activeLayout}`);
+
+  // Mode resolution is per-tick and depends on the current stdin.model.id, which
+  // /ohud doctor doesn't have access to (it runs without a piped session). Document
+  // the rule instead of fabricating a result, so users understand the resolver.
+  lines.push(`Daemon probe: ${probe.daemonOk ? "ok" : "fail"}`);
+  lines.push(
+    `Mode resolution rule: model.id starts with "claude-" → anthropic; ` +
+    `otherwise → ollama; missing → daemon-probe fallback (currently ` +
+    `${probe.daemonOk ? "ollama" : "anthropic"}).`,
+  );
+
+  // Hush config summary when active layout is hush
+  if (activeLayout === "hush") {
+    const h = cfg.display.hush ?? {};
+    lines.push(
+      `Hush config: compactWhenIdle=${h.compactWhenIdle ?? true}, hyperlinks=${h.hyperlinks ?? true}, animate=${h.animate ?? true}`,
+    );
+  }
 
   lines.push(`\nactive config flags (consumed?):`);
   lines.push(renderFlagAnnotations(cfg));
