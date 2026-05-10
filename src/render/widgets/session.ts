@@ -11,27 +11,19 @@ import type { Widget, WidgetCell, HushCell } from "../widget.js";
 import type { ParsedTranscript, RenderContext } from "../../types.js";
 
 /**
- * Format elapsed seconds as H:MM:SS (≥ 1h) or M:SS (< 1h).
- * No leading zero on the leftmost digit.
- *
- * Examples:
- *   0     → "0:00"
- *   65    → "1:05"
- *   3725  → "1:02:05"
- *   7259  → "2:00:59"
+ * Format elapsed seconds as a compact "starts" duration:
+ *   0..59s    → "<1m"
+ *   60..3599  → "Mm"        (e.g. "5m", "59m")
+ *   ≥ 1h      → "HhMm"      (e.g. "2h33m", "12h5m")
+ * No seconds component — at this scale they are noise.
  */
 function formatElapsed(totalSeconds: number): string {
-  const s = totalSeconds % 60;
+  if (totalSeconds < 60) return "<1m";
   const totalMinutes = Math.floor(totalSeconds / 60);
   const m = totalMinutes % 60;
   const h = Math.floor(totalMinutes / 60);
-
-  const ss = String(s).padStart(2, "0");
-  if (h > 0) {
-    const mm = String(m).padStart(2, "0");
-    return `${h}:${mm}:${ss}`;
-  }
-  return `${m}:${ss}`;
+  if (h === 0) return `${m}m`;
+  return `${h}h${m}m`;
 }
 
 /**
@@ -54,9 +46,7 @@ export function renderSessionTimeCell(
   const elapsedSec = Math.max(0, Math.floor(elapsedMs / 1000));
 
   return {
-    primaryText: "session time",
-    secondaryText: formatElapsed(elapsedSec),
-    text: `session time ${formatElapsed(elapsedSec)}`,
+    text: `starts ${formatElapsed(elapsedSec)}`,
     attention: "muted",
     group: "metrics",
     priority: 30,

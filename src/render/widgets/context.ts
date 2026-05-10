@@ -34,17 +34,43 @@ export const contextWidget: Widget = {
       rounded >= warn ? "warning" :
       "muted";
 
-    // No `of <size>` capacity suffix here — the model widget already prints
-    // the context window in parens (e.g. "Opus 4.7 (1M)"), so repeating it
-    // in the context cell ("with context X% of 1M used") would be redundant.
+    // Format: "context 310/1M (31%)" — used tokens / total tokens (percent).
+    // The total comes from Ollama probe when available (more accurate for
+    // remote models), otherwise from stdin's reported context_window_size.
+    const stdinTotal = ctx.stdin.context_window?.context_window_size;
+    const probeTotal = ctx.mode === "ollama"
+      ? ctx.cloudModels.find((m) => m.name === ctx.stdin.model?.id || m.model === ctx.stdin.model?.id)?.context_length
+      : undefined;
+    const total = probeTotal ?? stdinTotal;
+    const used = ctx.stdin.context_window?.current_usage?.input_tokens ?? null;
+
+    let text: string;
+    if (typeof total === "number" && total > 0 && typeof used === "number") {
+      text = `context ${formatTokens(used)}/${formatTokens(total)} (${rounded}%)`;
+    } else {
+      text = `context ${rounded}%`;
+    }
 
     return {
       group: "metrics",
-      text: `${rounded}%`,
+      text,
       attention,
     };
   },
 };
+
+/** Format a token count compactly. 1234 → "1.2k", 262144 → "262k", 1_000_000 → "1M". */
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return (Math.round(m * 10) / 10).toString().replace(/\.0$/, "") + "M";
+  }
+  if (n >= 1_000) {
+    const k = n / 1_000;
+    return (Math.round(k * 10) / 10).toString().replace(/\.0$/, "") + "k";
+  }
+  return String(Math.round(n));
+}
 
 /** Round context window size to nearest 100k or 1M for display. */
 function formatCapacity(size: number): string {

@@ -609,23 +609,27 @@ var projectWidget = {
       baseColor: "cyan"
     });
     if (ctx.config.gitStatus.enabled && ctx.gitStatus) {
-      const dirty = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty;
-      const dirtyMark = dirty ? ctx.config.display.glyphs === "ascii" ? " *" : " ●" : "";
-      const branchText = ctx.gitStatus.branch + dirtyMark;
-      const attention = dirty ? "warning" : "normal";
+      const g = ctx.gitStatus;
+      const parts = [];
+      if (g.ahead > 0)
+        parts.push(`+${g.ahead}`);
+      if (g.behind > 0)
+        parts.push(`-${g.behind}`);
+      const dirty = ctx.config.gitStatus.showDirty && g.dirty;
+      if (dirty)
+        parts.push("*");
+      const detail = parts.length > 0 ? `(${parts.join(" ")})` : "";
       cells.push({
         subId: "branch",
         group: "header",
-        text: branchText,
-        attention,
+        text: `git@${g.branch}${detail}`,
+        attention: dirty ? "warning" : "normal",
         baseColor: dirty ? undefined : "green"
       });
     }
     if (ctx.config.display.showModel) {
       const rawId = ctx.stdin.model?.id ?? "";
-      const probeCwSize = ctx.mode === "ollama" ? ctx.cloudModels.find((m) => m.name === rawId || m.model === rawId)?.context_length : undefined;
-      const cwSize = probeCwSize ?? ctx.stdin.context_window?.context_window_size;
-      const modelLabel = formatModelLabel(rawId, cwSize);
+      const modelLabel = condenseModelId(rawId);
       if (modelLabel) {
         cells.push({
           subId: "model",
@@ -703,6 +707,8 @@ function effortBlock(ctx) {
 }
 function condenseModelId(nameOrId) {
   let s = nameOrId.trim();
+  s = s.replace(/:[a-zA-Z0-9_-]+$/, "");
+  s = s.replace(/-\d{8}$/, "");
   s = s.replace(/(-?(\[)?(\d+m|\d+k)\]?)$/i, "");
   if (s.toLowerCase().startsWith("claude-"))
     s = s.slice(7);
@@ -980,26 +986,6 @@ function packActivityLine(cells, counterText, now, mode, env, toggles, termWidth
   }
   return result;
 }
-function renderMetricsCell(cell, env) {
-  const noColor = isColorDisabled(env);
-  const text = cell.text;
-  switch (cell.attention) {
-    case "warning":
-      if (!noColor)
-        return `\x1B[33m${dim(text, env)}\x1B[39m`;
-      return text;
-    case "danger":
-      if (!noColor)
-        return `\x1B[31m${dim(text, env)}\x1B[39m`;
-      return text;
-    case "normal":
-      if (!noColor && cell.baseColor)
-        return applyColor(text, cell.baseColor, env);
-      return text;
-    default:
-      return applyDimColor(text, cell.baseColor, env);
-  }
-}
 function bulletPadding(density) {
   switch (density) {
     case "comfortable":
@@ -1009,16 +995,6 @@ function bulletPadding(density) {
     default:
       return 1;
   }
-}
-function buildExtras(metricsCells, env, padding) {
-  if (metricsCells.length === 0)
-    return "";
-  const noColor = isColorDisabled(env);
-  const pad = " ".repeat(padding);
-  const bullet = noColor ? "•" : "\x1B[2m•\x1B[22m";
-  const sep = `${pad}${bullet}${pad}`;
-  const rendered = metricsCells.map((cell) => renderMetricsCell(cell, env));
-  return sep + rendered.join(sep);
 }
 function sessionFileUrl(sessionId) {
   if (!sessionId)
@@ -1059,39 +1035,41 @@ var hushLayout = {
     const nameCell = headerCells.find((c) => c.subId === "name");
     const branchCell = headerCells.find((c) => c.subId === "branch");
     const modelCell = headerCells.find((c) => c.subId === "model");
-    const contextCell = metricsCells.find((c) => c.id === "context");
-    const extrasCells = metricsCells.filter((c) => c.id !== "context");
     const iconText = iconCell?.text ?? "";
-    const projectName = nameCell?.text ?? nameCell?.primaryText ?? "?";
-    const branchName = branchCell?.text ?? "";
-    const modelLabel = modelCell?.text ?? "";
-    const contextText = contextCell?.text ?? "";
     const dimStr = (s) => dim(s, env);
-    const segments = [];
-    segments.push(toggles.identityColors && nameCell?.baseColor ? applyColor(projectName, nameCell.baseColor, env) : dimStr(projectName));
-    if (branchName) {
-      segments.push(dimStr(" on "));
-      segments.push(toggles.identityColors ? applyColor(branchName, "green", env) : dimStr(branchName));
+    function renderCell(c) {
+      const txt = c.text;
+      if (!noColor && c.attention === "warning")
+        return `\x1B[33m${dimStr(txt)}\x1B[39m`;
+      if (!noColor && c.attention === "danger")
+        return `\x1B[31m${dimStr(txt)}\x1B[39m`;
+      if (toggles.identityColors && c.baseColor)
+        return applyColor(txt, c.baseColor, env);
+      return dimStr(txt);
     }
-    if (modelLabel) {
-      segments.push(dimStr(" using "));
-      segments.push(toggles.identityColors ? applyColor(modelLabel, "blue", env) : dimStr(modelLabel));
+    const headerOrdered = [];
+    if (modelCell)
+      headerOrdered.push(modelCell);
+    if (nameCell)
+      headerOrdered.push(nameCell);
+    if (branchCell)
+      headerOrdered.push(branchCell);
+    const metricsOrder = ["context", "sessionTime", "usage", "tokensPerSec", "errors"];
+    const metricsOrdered = [];
+    for (const id of metricsOrder) {
+      const c = metricsCells.find((m) => m.id === id);
+      if (c)
+        metricsOrdered.push(c);
     }
-    if (contextText) {
-      segments.push(dimStr(" with context "));
-      const attention = contextCell?.attention ?? "muted";
-      if (attention === "warning" && !noColor) {
-        segments.push(`\x1B[33m${dimStr(contextText)}\x1B[39m`);
-      } else if (attention === "danger" && !noColor) {
-        segments.push(`\x1B[31m${dimStr(contextText)}\x1B[39m`);
-      } else {
-        segments.push(dimStr(contextText));
-      }
-      segments.push(dimStr(" used"));
+    for (const c of metricsCells) {
+      if (!metricsOrder.includes(c.id ?? ""))
+        metricsOrdered.push(c);
     }
-    const sentenceBody = segments.join("");
-    const sentenceStr = iconText ? `${iconText} ${sentenceBody}` : sentenceBody;
-    const extrasStr = buildExtras(extrasCells, env, padding);
+    const allCells = [...headerOrdered, ...metricsOrdered];
+    const cellSegments = allCells.map(renderCell).filter(Boolean);
+    const headerBody = cellSegments.join(bulletSep);
+    const sentenceStr = iconText ? headerBody ? `${iconText} ${headerBody}` : iconText : headerBody;
+    const extrasStr = "";
     const cappedActivity = capActivityCells(activityCells);
     const totalToolCount = (() => {
       let n = 0;
@@ -1119,16 +1097,9 @@ var hushLayout = {
     const hasActivity = cappedActivity.length > 0;
     const indent = "  ";
     const lines = [];
-    const hasSentenceContent = iconText !== "" || nameCell != null || branchName !== "" || modelLabel !== "" || contextText !== "";
-    const fullLine = sentenceStr + extrasStr;
-    if (hasSentenceContent || extrasStr) {
-      if (!extrasStr || visibleWidth(fullLine) <= termWidth) {
-        lines.push(fullLine);
-      } else {
-        lines.push(sentenceStr);
-        const extrasBody = extrasStr.trimStart();
-        lines.push(indent + extrasBody);
-      }
+    const hasHeaderContent = iconText !== "" || allCells.length > 0;
+    if (hasHeaderContent) {
+      lines.push(sentenceStr);
     }
     if (hasActivity) {
       const actIndent = lines.length > 0 ? indent : "";
@@ -1856,13 +1827,34 @@ var contextWidget = {
     const warn = ctx.config.display.hush?.thresholds?.warning ?? ctx.config.display.warningThreshold;
     const crit = ctx.config.display.hush?.thresholds?.danger ?? ctx.config.display.criticalThreshold;
     const attention = rounded >= crit ? "danger" : rounded >= warn ? "warning" : "muted";
+    const stdinTotal = ctx.stdin.context_window?.context_window_size;
+    const probeTotal = ctx.mode === "ollama" ? ctx.cloudModels.find((m) => m.name === ctx.stdin.model?.id || m.model === ctx.stdin.model?.id)?.context_length : undefined;
+    const total = probeTotal ?? stdinTotal;
+    const used = ctx.stdin.context_window?.current_usage?.input_tokens ?? null;
+    let text;
+    if (typeof total === "number" && total > 0 && typeof used === "number") {
+      text = `context ${formatTokens(used)}/${formatTokens(total)} (${rounded}%)`;
+    } else {
+      text = `context ${rounded}%`;
+    }
     return {
       group: "metrics",
-      text: `${rounded}%`,
+      text,
       attention
     };
   }
 };
+function formatTokens(n) {
+  if (n >= 1e6) {
+    const m = n / 1e6;
+    return (Math.round(m * 10) / 10).toString().replace(/\.0$/, "") + "M";
+  }
+  if (n >= 1000) {
+    const k = n / 1000;
+    return (Math.round(k * 10) / 10).toString().replace(/\.0$/, "") + "k";
+  }
+  return String(Math.round(n));
+}
 var BAR_WIDTH = 10;
 function renderContext(ctx) {
   if (!ctx.config.display.showContextBar)
@@ -2650,16 +2642,14 @@ function readRules(startDir) {
 
 // src/render/widgets/session.ts
 function formatElapsed2(totalSeconds) {
-  const s = totalSeconds % 60;
+  if (totalSeconds < 60)
+    return "<1m";
   const totalMinutes = Math.floor(totalSeconds / 60);
   const m = totalMinutes % 60;
   const h = Math.floor(totalMinutes / 60);
-  const ss = String(s).padStart(2, "0");
-  if (h > 0) {
-    const mm = String(m).padStart(2, "0");
-    return `${h}:${mm}:${ss}`;
-  }
-  return `${m}:${ss}`;
+  if (h === 0)
+    return `${m}m`;
+  return `${h}h${m}m`;
 }
 function renderSessionTimeCell(transcript, now) {
   if (transcript == null)
@@ -2670,9 +2660,7 @@ function renderSessionTimeCell(transcript, now) {
   const elapsedMs = now - sessionStart.getTime();
   const elapsedSec = Math.max(0, Math.floor(elapsedMs / 1000));
   return {
-    primaryText: "session time",
-    secondaryText: formatElapsed2(elapsedSec),
-    text: `session time ${formatElapsed2(elapsedSec)}`,
+    text: `starts ${formatElapsed2(elapsedSec)}`,
     attention: "muted",
     group: "metrics",
     priority: 30

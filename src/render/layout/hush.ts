@@ -365,70 +365,57 @@ export const hushLayout: Layout = {
     const nameCell    = headerCells.find((c) => c.subId === "name");
     const branchCell  = headerCells.find((c) => c.subId === "branch");
     const modelCell   = headerCells.find((c) => c.subId === "model");
-    const contextCell = metricsCells.find((c) => c.id === "context");
-    // Extras: all metrics cells EXCEPT the context cell
-    const extrasCells = metricsCells.filter((c) => c.id !== "context");
 
-    const iconText    = iconCell?.text ?? "";
-    // Project name: prefer the name cell's text. Fall back to "?" only when
-    // no project widget has emitted a name cell — this surfaces the missing
-    // input rather than masking it with a hardcoded literal.
-    const projectName = nameCell?.text ?? nameCell?.primaryText ?? "?";
-    const branchName  = branchCell?.text ?? "";
-    const modelLabel  = modelCell?.text ?? "";
-    const contextText = contextCell?.text ?? "";
+    const iconText = iconCell?.text ?? "";
 
     // -----------------------------------------------------------------------
-    // Build the prose sentence
+    // Build the header line as bullet-separated cells.
     // -----------------------------------------------------------------------
+    // Order is intentional and tuned for left-to-right scanning:
+    //   model → project → git → context → session-time → rate → tokens/s → errors
+    // Cell text is dimmed by default; threshold attention (warning/danger)
+    // overrides with subtle yellow/red wrapping. identityColors=true (off by
+    // default) lets baseColor tint specific cells like model/branch — kept
+    // intentionally subtle, never saturated.
 
     const dimStr = (s: string) => dim(s, env);
 
-    const segments: string[] = [];
-
-    // "{projectName}"
-    segments.push(toggles.identityColors && nameCell?.baseColor
-      ? applyColor(projectName, nameCell.baseColor, env)
-      : dimStr(projectName));
-
-    // " on {branch}"
-    if (branchName) {
-      segments.push(dimStr(" on "));
-      segments.push(toggles.identityColors
-        ? applyColor(branchName, "green", env)
-        : dimStr(branchName));
+    function renderCell(c: HushCell): string {
+      const txt = c.text;
+      if (!noColor && c.attention === "warning") return `\x1b[33m${dimStr(txt)}\x1b[39m`;
+      if (!noColor && c.attention === "danger")  return `\x1b[31m${dimStr(txt)}\x1b[39m`;
+      if (toggles.identityColors && c.baseColor) return applyColor(txt, c.baseColor, env);
+      return dimStr(txt);
     }
 
-    // " using {model}"
-    if (modelLabel) {
-      segments.push(dimStr(" using "));
-      segments.push(toggles.identityColors
-        ? applyColor(modelLabel, "blue", env)
-        : dimStr(modelLabel));
+    // Header cells in display order, only including those actually present.
+    const headerOrdered: HushCell[] = [];
+    if (modelCell)  headerOrdered.push(modelCell);
+    if (nameCell)   headerOrdered.push(nameCell);
+    if (branchCell) headerOrdered.push(branchCell);
+
+    // Metrics cells in display order — pull by id from the registry.
+    const metricsOrder = ["context", "sessionTime", "usage", "tokensPerSec", "errors"];
+    const metricsOrdered: HushCell[] = [];
+    for (const id of metricsOrder) {
+      const c = metricsCells.find((m) => m.id === id);
+      if (c) metricsOrdered.push(c);
+    }
+    // Append any other metrics cells not in the explicit order (forward-compat).
+    for (const c of metricsCells) {
+      if (!metricsOrder.includes(c.id ?? "")) metricsOrdered.push(c);
     }
 
-    // " with context {pct}% used"
-    if (contextText) {
-      segments.push(dimStr(" with context "));
-      const attention = contextCell?.attention ?? "muted";
-      if (attention === "warning" && !noColor) {
-        segments.push(`\x1b[33m${dimStr(contextText)}\x1b[39m`);
-      } else if (attention === "danger" && !noColor) {
-        segments.push(`\x1b[31m${dimStr(contextText)}\x1b[39m`);
-      } else {
-        segments.push(dimStr(contextText));
-      }
-      segments.push(dimStr(" used"));
-    }
+    const allCells = [...headerOrdered, ...metricsOrdered];
+    const cellSegments = allCells.map(renderCell).filter(Boolean);
+    const headerBody = cellSegments.join(bulletSep);
+    const sentenceStr = iconText
+      ? (headerBody ? `${iconText} ${headerBody}` : iconText)
+      : headerBody;
 
-    const sentenceBody = segments.join("");
-    // Icon at full intensity (no dim), followed by a space
-    const sentenceStr = iconText ? `${iconText} ${sentenceBody}` : sentenceBody;
-
-    // -----------------------------------------------------------------------
-    // Build extras
-    // -----------------------------------------------------------------------
-    const extrasStr = buildExtras(extrasCells, env, padding);
+    // No separate extras path in the card layout — everything flows on one
+    // line with bullet separators, wrapping handled below.
+    const extrasStr = "";
 
     // -----------------------------------------------------------------------
     // Activity cells & OSC 8 counter (production-wired)
@@ -491,23 +478,15 @@ export const hushLayout: Layout = {
     // cells were provided AND no extras exist — this is the activity-only
     // input shape. In production the projectWidget always emits cells, so the
     // sentence is always present; this guard exists for tests and safety.
-    const hasSentenceContent =
-      iconText !== "" || nameCell != null || branchName !== "" ||
-      modelLabel !== "" || contextText !== "";
-    const fullLine = sentenceStr + extrasStr;
+    const hasHeaderContent = iconText !== "" || allCells.length > 0;
 
-    if (hasSentenceContent || extrasStr) {
-      if (!extrasStr || visibleWidth(fullLine) <= termWidth) {
-        // Everything fits (or no extras) — single line
-        lines.push(fullLine);
-      } else {
-        // Extras overflow — wrap to line 2 with indent
-        lines.push(sentenceStr);
-        // extrasStr starts with the separator (pad+bullet+pad); strip the leading
-        // pad and replace with indent so it reads: "  • cache ..."
-        const extrasBody = extrasStr.trimStart();
-        lines.push(indent + extrasBody);
-      }
+    if (hasHeaderContent) {
+      // Card layout: a single line of bullet-joined cells. We do not split
+      // overflow across two lines because that would invert the visual
+      // priority — the user wants every cell on the same scan line. If the
+      // line exceeds termWidth we let the terminal wrap (or trust priority
+      // truncation already handled cell drops upstream).
+      lines.push(sentenceStr);
     }
 
     // -----------------------------------------------------------------------

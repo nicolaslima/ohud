@@ -51,37 +51,36 @@ export const projectWidget: Widget = {
       baseColor: "cyan",
     });
 
-    // --- Sub-cell 2: git branch (green=clean, yellow=dirty; no link in prose design) ---
+    // --- Sub-cell 2: git branch with ahead/staged/removed counts ---
+    // Format: "git@<branch>" optionally followed by "(+A *S -D)" where A is
+    // commits ahead of upstream, S is staged (or modified) files, and D is
+    // deletions. We only emit the parens when at least one count is > 0.
     if (ctx.config.gitStatus.enabled && ctx.gitStatus) {
-      const dirty = ctx.config.gitStatus.showDirty && ctx.gitStatus.dirty;
-      const dirtyMark = dirty
-        ? (ctx.config.display.glyphs === "ascii" ? " *" : " ●")
-        : "";
-      const branchText = ctx.gitStatus.branch + dirtyMark;
-      const attention = dirty ? "warning" : "normal";
+      const g = ctx.gitStatus;
+      const parts: string[] = [];
+      if (g.ahead > 0)  parts.push(`+${g.ahead}`);
+      // The git probe currently surfaces only `dirty` (boolean) and
+      // ahead/behind counts. Use behind for the "removed/back" indicator
+      // since we don't carry per-file granularity.
+      if (g.behind > 0) parts.push(`-${g.behind}`);
+      // Dirty signals at least one staged/modified file; show a "*" without
+      // a number rather than fabricating one.
+      const dirty = ctx.config.gitStatus.showDirty && g.dirty;
+      if (dirty)        parts.push("*");
+      const detail = parts.length > 0 ? `(${parts.join(" ")})` : "";
       cells.push({
         subId: "branch",
         group: "header",
-        text: branchText,
-        attention,
+        text: `git@${g.branch}${detail}`,
+        attention: dirty ? "warning" : "normal",
         baseColor: dirty ? undefined : "green",
       });
     }
 
-    // --- Sub-cell 3: model label (no link in prose design) ---
+    // --- Sub-cell 3: compact model id (no parens — context cell shows total) ---
     if (ctx.config.display.showModel) {
       const rawId = ctx.stdin.model?.id ?? "";
-      // Context-window source priority for the model label parens:
-      //   1. Ollama probe (`ctx.cloudModels[*].context_length`) when in Ollama
-      //      mode — Claude Code's stdin defaults to 1M for unknown remote
-      //      models, which is wrong for e.g. kimi-k2.6:cloud (256K).
-      //   2. Claude Code stdin's `context_window_size` — authoritative for
-      //      Anthropic and any model the host actually knows.
-      const probeCwSize = ctx.mode === "ollama"
-        ? ctx.cloudModels.find((m) => m.name === rawId || m.model === rawId)?.context_length
-        : undefined;
-      const cwSize = probeCwSize ?? ctx.stdin.context_window?.context_window_size;
-      const modelLabel = formatModelLabel(rawId, cwSize);
+      const modelLabel = condenseModelId(rawId);
       if (modelLabel) {
         cells.push({
           subId: "model",
@@ -167,20 +166,24 @@ function effortBlock(ctx: RenderContext): string {
 }
 
 /** Condense a model display_name or id to a compact label.
- *  Kept for backward compatibility — consumed by agents.ts.
- *  New code should use formatModelLabel() instead.
- *  "claude-opus-4-7-1m" → "opus-4.7"  (strips context-window suffix first)
- *  "claude-opus-4-7" → "opus-4.7"
- *  "Claude Opus 4.7" → "opus-4.7" (lowercase, strip "claude ")
- *  Anything else returned as-is. */
+ *  "claude-opus-4-7-1m"   → "opus-4.7"
+ *  "claude-opus-4-7"      → "opus-4.7"
+ *  "Claude Opus 4.7"      → "opus-4.7"
+ *  "kimi-k2.6:cloud"      → "kimi-k2.6"   (Ollama tag suffix stripped)
+ *  "claude-haiku-4-5-20251001" → "haiku-4.5"  (date stamp stripped)
+ *  Anything else returned lowercased and trimmed. */
 export function condenseModelId(nameOrId: string): string {
   let s = nameOrId.trim();
-  // Strip context-window suffix FIRST: -1m, [1m], -200k, [200k], etc.
+  // Strip Ollama tag suffix (":cloud", ":dev", ":latest", etc.)
+  s = s.replace(/:[a-zA-Z0-9_-]+$/, "");
+  // Strip trailing date stamp like -20251001 (8 digits).
+  s = s.replace(/-\d{8}$/, "");
+  // Strip context-window suffix: -1m, [1m], -200k, [200k], etc.
   s = s.replace(/(-?(\[)?(\d+m|\d+k)\]?)$/i, "");
-  // Strip leading "claude-" or "claude " prefix
+  // Strip leading "claude-" or "claude " prefix.
   if (s.toLowerCase().startsWith("claude-")) s = s.slice(7);
   else if (s.toLowerCase().startsWith("claude ")) s = s.slice(7);
-  // Replace hyphens-between-digits with dots: "opus-4-7" → "opus-4.7"
+  // Replace hyphens between digits with dots ("opus-4-7" → "opus-4.7").
   s = s.replace(/(\d)-(\d)/g, "$1.$2").toLowerCase();
   return s;
 }
