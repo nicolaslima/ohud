@@ -59,12 +59,16 @@ test("probe writes cache and re-uses it within TTL", async () => {
   const counting = mock(async (url: string) => {
     calls += 1;
     if (url.endsWith("/api/version")) return new Response(JSON.stringify({ version: "0.23.2" }));
+    if (url.endsWith("/api/show")) return new Response(JSON.stringify({ model_info: { "test.context_length": 200000 } }));
     return new Response(cloudFixture);
   }) as unknown as typeof fetch;
   await probeOllama({ host: "http://localhost:11434", sessionId: "test-session", daemonTtlSeconds: 60, cloudModelsTtlSeconds: 120, timeoutMs: 500, fetchImpl: counting });
+  const callsAfterFirst = calls;
   await probeOllama({ host: "http://localhost:11434", sessionId: "test-session", daemonTtlSeconds: 60, cloudModelsTtlSeconds: 120, timeoutMs: 500, fetchImpl: counting });
-  // Second call must hit the cache (no new fetch)
-  expect(calls).toBe(2); // 1 version + 1 tags
+  // Second call must hit the cache — no additional fetches.
+  // First call: 1 version + 1 tags + 2 show (one per cloud model in fixture).
+  expect(callsAfterFirst).toBe(4);
+  expect(calls).toBe(callsAfterFirst);
 });
 
 test("probe re-fetches when daemonOk:false cache is older than daemonTtl", async () => {

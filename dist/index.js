@@ -89,16 +89,35 @@ import { join } from "node:path";
 function probeCachePath(sessionId) {
   return join(tmpdir(), `ohud-probe-${sessionId}.json`);
 }
-async function fetchWithTimeout(url, timeoutMs, fetchImpl) {
+async function fetchWithTimeout(url, timeoutMs, fetchImpl, init) {
   const controller = new AbortController;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetchImpl(url, { signal: controller.signal });
+    return await fetchImpl(url, { ...init, signal: controller.signal });
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+async function fetchContextLength(host, modelName, timeoutMs, fetchImpl) {
+  const res = await fetchWithTimeout(`${host}/api/show`, timeoutMs, fetchImpl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: modelName })
+  });
+  if (!res || !res.ok)
+    return null;
+  try {
+    const body = await res.json();
+    const info = body.model_info ?? {};
+    for (const [key, value] of Object.entries(info)) {
+      if (key.endsWith(".context_length") && typeof value === "number" && Number.isFinite(value) && value > 0) {
+        return value;
+      }
+    }
+  } catch {}
+  return null;
 }
 function readCache(path) {
   if (!existsSync(path))
@@ -161,6 +180,17 @@ async function probeOllama(opts) {
     parsed = await tagsRes.json();
   } catch {}
   const cloudModels = (parsed.models ?? []).filter((m) => typeof m.remote_host === "string" && m.remote_host.length > 0);
+  const cachedByName = new Map((cached?.cloudModels ?? []).map((m) => [m.name, m]));
+  await Promise.all(cloudModels.map(async (m) => {
+    const prior = cachedByName.get(m.name);
+    if (prior?.context_length) {
+      m.context_length = prior.context_length;
+      return;
+    }
+    const ctx = await fetchContextLength(opts.host, m.name, opts.timeoutMs, fetchImpl);
+    if (ctx !== null)
+      m.context_length = ctx;
+  }));
   const result = {
     daemonOk: true,
     cloudModels,
@@ -593,7 +623,8 @@ var projectWidget = {
     }
     if (ctx.config.display.showModel) {
       const rawId = ctx.stdin.model?.id ?? "";
-      const cwSize = ctx.stdin.context_window?.context_window_size;
+      const probeCwSize = ctx.mode === "ollama" ? ctx.cloudModels.find((m) => m.name === rawId || m.model === rawId)?.context_length : undefined;
+      const cwSize = probeCwSize ?? ctx.stdin.context_window?.context_window_size;
       const modelLabel = formatModelLabel(rawId, cwSize);
       if (modelLabel) {
         cells.push({

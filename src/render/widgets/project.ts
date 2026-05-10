@@ -71,7 +71,16 @@ export const projectWidget: Widget = {
     // --- Sub-cell 3: model label (no link in prose design) ---
     if (ctx.config.display.showModel) {
       const rawId = ctx.stdin.model?.id ?? "";
-      const cwSize = ctx.stdin.context_window?.context_window_size;
+      // Context-window source priority for the model label parens:
+      //   1. Ollama probe (`ctx.cloudModels[*].context_length`) when in Ollama
+      //      mode — Claude Code's stdin defaults to 1M for unknown remote
+      //      models, which is wrong for e.g. kimi-k2.6:cloud (256K).
+      //   2. Claude Code stdin's `context_window_size` — authoritative for
+      //      Anthropic and any model the host actually knows.
+      const probeCwSize = ctx.mode === "ollama"
+        ? ctx.cloudModels.find((m) => m.name === rawId || m.model === rawId)?.context_length
+        : undefined;
+      const cwSize = probeCwSize ?? ctx.stdin.context_window?.context_window_size;
       const modelLabel = formatModelLabel(rawId, cwSize);
       if (modelLabel) {
         cells.push({

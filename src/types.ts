@@ -90,6 +90,10 @@ export interface OllamaTagsModel {
     parameter_size?: string;
     quantization_level?: string;
   };
+  /** Token context length, fetched from /api/show. May be absent if the
+   *  show probe failed or the model_info doesn't surface a *.context_length
+   *  key. The probe caches it with the same long TTL as the tags list. */
+  context_length?: number;
 }
 
 export interface OllamaProbeResult {
