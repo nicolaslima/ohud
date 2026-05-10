@@ -409,7 +409,11 @@ function iconForMode(mode, glyphMode, override = "auto") {
   }
   if (variant === null)
     return "";
-  const tier = glyphMode === "auto" ? autoMode() : glyphMode;
+  let tier;
+  if (glyphMode === "auto")
+    tier = autoMode() === "ascii" ? "ascii" : "nerd";
+  else
+    tier = glyphMode;
   if (tier === "ascii")
     return ICON_ASCII[variant];
   if (tier === "nerd")

@@ -127,8 +127,20 @@ export function iconForMode(
 
   if (variant === null) return "";
 
-  // Resolve glyph tier (same auto-detection as glyph())
-  const tier = glyphMode === "auto" ? autoMode() : glyphMode;
+  // Resolve glyph tier — icons take a slightly different path than the
+  // generic glyph() helper:
+  //
+  //   - For UI glyphs (bolt, clock, spinner) we deliberately never promote
+  //     "auto" to "nerd" because they tick constantly and a box character
+  //     on every frame would be visually noisy.
+  //   - For brand icons we DO promote "auto" → "nerd" because the icon
+  //     appears once per line and the only non-emoji llama in common use
+  //     is the Nerd Font codepoint U+E27B. Falling back to ◆ in unicode
+  //     mode loses the brand's personality. Users who don't have Nerd
+  //     Fonts installed can opt out via `display.glyphs: "unicode"`.
+  let tier: "unicode" | "ascii" | "nerd";
+  if (glyphMode === "auto")        tier = autoMode() === "ascii" ? "ascii" : "nerd";
+  else                              tier = glyphMode;
 
   if (tier === "ascii") return ICON_ASCII[variant];
   if (tier === "nerd")  return ICON_NERD[variant] ?? ICON_UNICODE[variant];
