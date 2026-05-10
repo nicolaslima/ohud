@@ -8,7 +8,7 @@
 // errors survive truncation while session time may drop first.
 
 import type { Widget, WidgetCell, HushCell } from "../widget.js";
-import type { ParsedTranscript, RenderContext } from "../../types.js";
+import type { ParsedTranscript, RenderContext, StdinData } from "../../types.js";
 
 /**
  * Format elapsed seconds as a compact "starts" duration:
@@ -27,23 +27,37 @@ function formatElapsed(totalSeconds: number): string {
 }
 
 /**
- * Returns a HushCell for session elapsed time, or null when the transcript or
- * sessionStart is unavailable.
+ * Returns a HushCell for session elapsed time, or null when neither the
+ * transcript nor stdin has any duration signal.
+ *
+ * Source priority:
+ *   1. transcript.sessionStart  — most accurate (first JSONL entry timestamp);
+ *      survives across statusline ticks because the transcript is on disk.
+ *   2. stdin.cost.total_duration_ms — Claude Code's own duration counter;
+ *      works even when the transcript is unreadable or fresh.
  *
  * @param transcript  Parsed transcript (may be null when file is unreadable).
+ * @param stdin       Claude Code stdin payload (may be undefined in tests).
  * @param now         Current epoch ms (injected for testability).
  */
 export function renderSessionTimeCell(
   transcript: ParsedTranscript | null,
+  stdin: StdinData | undefined,
   now: number,
 ): HushCell | null {
-  if (transcript == null) return null;
-  const sessionStart = transcript.sessionStart;
-  if (sessionStart == null) return null;
+  let elapsedSec: number | null = null;
 
-  const elapsedMs = now - sessionStart.getTime();
-  // Guard against clock skew (future sessionStart)
-  const elapsedSec = Math.max(0, Math.floor(elapsedMs / 1000));
+  if (transcript?.sessionStart) {
+    const elapsedMs = now - transcript.sessionStart.getTime();
+    elapsedSec = Math.max(0, Math.floor(elapsedMs / 1000));
+  } else {
+    const dms = stdin?.cost?.total_duration_ms;
+    if (typeof dms === "number" && dms > 0) {
+      elapsedSec = Math.floor(dms / 1000);
+    }
+  }
+
+  if (elapsedSec === null) return null;
 
   return {
     text: `starts ${formatElapsed(elapsedSec)}`,
@@ -60,12 +74,12 @@ export const sessionTimeWidget: Widget = {
   minWidth: 16,
 
   render(ctx: RenderContext): WidgetCell | null {
-    const cell = renderSessionTimeCell(ctx.transcript as ParsedTranscript, Date.now());
+    const cell = renderSessionTimeCell(ctx.transcript as ParsedTranscript, ctx.stdin, Date.now());
     if (cell == null) return null;
     return { body: cell.text, visualWidth: cell.text.length };
   },
 
   renderHush(ctx: RenderContext): HushCell | null {
-    return renderSessionTimeCell(ctx.transcript as ParsedTranscript, Date.now());
+    return renderSessionTimeCell(ctx.transcript as ParsedTranscript, ctx.stdin, Date.now());
   },
 };

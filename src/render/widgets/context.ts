@@ -34,18 +34,25 @@ export const contextWidget: Widget = {
       rounded >= warn ? "warning" :
       "muted";
 
-    // Format: "context 310/1M (31%)" — used tokens / total tokens (percent).
+    // Format: "context 310k/1M (31%)" — used tokens / total tokens (percent).
     // The total comes from Ollama probe when available (more accurate for
-    // remote models), otherwise from stdin's reported context_window_size.
+    // remote models — Claude Code's stdin defaults to 1M for unknown remote
+    // models), otherwise from stdin's reported context_window_size.
+    //
+    // The "used" numerator is DERIVED from percent × total, NOT from
+    // current_usage.input_tokens. Reason: input_tokens reports the prompt
+    // size of the most recent turn (which can spike to 100k+ on a single
+    // big paste even when cumulative context is only 11%), and we want a
+    // monotonically rising number that matches the percent the user sees.
     const stdinTotal = ctx.stdin.context_window?.context_window_size;
     const probeTotal = ctx.mode === "ollama"
       ? ctx.cloudModels.find((m) => m.name === ctx.stdin.model?.id || m.model === ctx.stdin.model?.id)?.context_length
       : undefined;
     const total = probeTotal ?? stdinTotal;
-    const used = ctx.stdin.context_window?.current_usage?.input_tokens ?? null;
 
     let text: string;
-    if (typeof total === "number" && total > 0 && typeof used === "number") {
+    if (typeof total === "number" && total > 0) {
+      const used = Math.round((rounded / 100) * total);
       text = `context ${formatTokens(used)}/${formatTokens(total)} (${rounded}%)`;
     } else {
       text = `context ${rounded}%`;

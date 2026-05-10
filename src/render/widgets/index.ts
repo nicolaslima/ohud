@@ -97,9 +97,10 @@ function isVisible(w: Widget, config: HudConfig): boolean {
     case "sessionTime":
     case "tokensPerSec":
     case "errors":
-      // Hush-prose-only widgets: only the new prose layout consumes their cells.
-      // RowLayout has no slot for them, so gate on lineLayout to avoid noise.
-      return config.lineLayout === "compact";
+      // Hush-only widgets: their cells are designed for the prose/card
+      // layout. Gate on display.layout so they appear automatically when
+      // the user is on hush, without needing extra config.
+      return d.layout === "hush";
 
     // --- activity ---
     case "tools":

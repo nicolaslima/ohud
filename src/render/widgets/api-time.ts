@@ -38,12 +38,22 @@ export const apiTimeWidget: Widget = {
   },
 };
 
+/** Compact api-time format for the prose statusline.
+ *   < 1s          → "200ms"
+ *   1..59s        → "2.4s"
+ *   1..59m        → "5m"  ("5m20s" only when < 10 minutes)
+ *   ≥ 1h          → "1h12m"
+ */
 function formatApiTime(ms: number): string {
-  if (ms >= 1000) {
-    const s = (ms / 1000).toFixed(1);
-    return `${s}s`;
-  }
-  return `${Math.round(ms)}ms`;
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const totalSec = Math.floor(ms / 1000);
+  if (totalSec < 60) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m < 10) return `${m}m${s}s`;
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h${m % 60}m`;
 }
 
 // ---------------------------------------------------------------------------

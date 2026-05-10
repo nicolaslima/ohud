@@ -21,37 +21,17 @@ export const durationWidget: Widget = {
     return { body, visualWidth: maxLineWidth(body) };
   },
 
-  renderHush(ctx: RenderContext): HushCell | null {
-    if (!ctx.config.display.showDuration && !ctx.config.display.showSpeed) return null;
-    const ms = ctx.stdin.cost?.total_duration_ms;
-    if (typeof ms !== "number" || ms <= 0) return null;
-    // Suppress when session is under 4 hours — not informative at that scale.
-    if (ms < DURATION_NORMAL_MS) return null;
-
-    const text = formatDurationHush(ms);
-
-    const attention =
-      ms >= DURATION_DANGER_MS   ? "danger" :
-      ms >= DURATION_WARNING_MS  ? "warning" :
-      "normal";
-
-    return {
-      group: "activity",
-      text,
-      attention,
-    };
+  renderHush(_ctx: RenderContext): HushCell | null {
+    // Suppressed in hush layout: sessionTimeWidget renders the same signal
+    // ("starts Hh Mm") with a clearer label, and ALWAYS shows (not gated on
+    // a 4h threshold). The row layout still gets durationWidget via render().
+    return null;
   },
 };
 
-function formatDurationHush(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  // Compact format: no internal space — disambiguates from usage "5h 79%"
-  if (h > 0 && m > 0) return `${h}h${m}m`;
-  if (h > 0) return `${h}h`;
-  return `${m}m`;
-}
+// Suppress unused-warning for thresholds — they remain useful for the row
+// path's coloring and we want them documented at module top.
+void DURATION_WARNING_MS; void DURATION_DANGER_MS; void DURATION_NORMAL_MS;
 
 // ---------------------------------------------------------------------------
 // Row render implementation (moved from src/render/lines/duration.ts)

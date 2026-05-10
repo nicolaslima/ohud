@@ -1834,9 +1834,9 @@ var contextWidget = {
     const stdinTotal = ctx.stdin.context_window?.context_window_size;
     const probeTotal = ctx.mode === "ollama" ? ctx.cloudModels.find((m) => m.name === ctx.stdin.model?.id || m.model === ctx.stdin.model?.id)?.context_length : undefined;
     const total = probeTotal ?? stdinTotal;
-    const used = ctx.stdin.context_window?.current_usage?.input_tokens ?? null;
     let text;
-    if (typeof total === "number" && total > 0 && typeof used === "number") {
+    if (typeof total === "number" && total > 0) {
+      const used = Math.round(rounded / 100 * total);
       text = `context ${formatTokens(used)}/${formatTokens(total)} (${rounded}%)`;
     } else {
       text = `context ${rounded}%`;
@@ -1928,11 +1928,19 @@ var apiTimeWidget = {
   }
 };
 function formatApiTime(ms) {
-  if (ms >= 1000) {
-    const s = (ms / 1000).toFixed(1);
-    return `${s}s`;
-  }
-  return `${Math.round(ms)}ms`;
+  if (ms < 1000)
+    return `${Math.round(ms)}ms`;
+  const totalSec = Math.floor(ms / 1000);
+  if (totalSec < 60)
+    return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m < 10)
+    return `${m}m${s}s`;
+  if (m < 60)
+    return `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h${m % 60}m`;
 }
 function renderApiTime(ctx) {
   if (ctx.mode !== "ollama")
@@ -2208,33 +2216,10 @@ var durationWidget = {
       return null;
     return { body, visualWidth: maxLineWidth(body) };
   },
-  renderHush(ctx) {
-    if (!ctx.config.display.showDuration && !ctx.config.display.showSpeed)
-      return null;
-    const ms = ctx.stdin.cost?.total_duration_ms;
-    if (typeof ms !== "number" || ms <= 0)
-      return null;
-    if (ms < DURATION_NORMAL_MS)
-      return null;
-    const text = formatDurationHush(ms);
-    const attention = ms >= DURATION_DANGER_MS ? "danger" : ms >= DURATION_WARNING_MS ? "warning" : "normal";
-    return {
-      group: "activity",
-      text,
-      attention
-    };
+  renderHush(_ctx) {
+    return null;
   }
 };
-function formatDurationHush(ms) {
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor(totalSec % 3600 / 60);
-  if (h > 0 && m > 0)
-    return `${h}h${m}m`;
-  if (h > 0)
-    return `${h}h`;
-  return `${m}m`;
-}
 function renderDuration(ctx) {
   const showDuration = ctx.config.display.showDuration;
   const showSpeed = ctx.config.display.showSpeed;
@@ -2655,14 +2640,19 @@ function formatElapsed2(totalSeconds) {
     return `${m}m`;
   return `${h}h${m}m`;
 }
-function renderSessionTimeCell(transcript, now) {
-  if (transcript == null)
+function renderSessionTimeCell(transcript, stdin, now) {
+  let elapsedSec = null;
+  if (transcript?.sessionStart) {
+    const elapsedMs = now - transcript.sessionStart.getTime();
+    elapsedSec = Math.max(0, Math.floor(elapsedMs / 1000));
+  } else {
+    const dms = stdin?.cost?.total_duration_ms;
+    if (typeof dms === "number" && dms > 0) {
+      elapsedSec = Math.floor(dms / 1000);
+    }
+  }
+  if (elapsedSec === null)
     return null;
-  const sessionStart = transcript.sessionStart;
-  if (sessionStart == null)
-    return null;
-  const elapsedMs = now - sessionStart.getTime();
-  const elapsedSec = Math.max(0, Math.floor(elapsedMs / 1000));
   return {
     text: `starts ${formatElapsed2(elapsedSec)}`,
     attention: "muted",
@@ -2676,13 +2666,13 @@ var sessionTimeWidget = {
   priority: 30,
   minWidth: 16,
   render(ctx) {
-    const cell = renderSessionTimeCell(ctx.transcript, Date.now());
+    const cell = renderSessionTimeCell(ctx.transcript, ctx.stdin, Date.now());
     if (cell == null)
       return null;
     return { body: cell.text, visualWidth: cell.text.length };
   },
   renderHush(ctx) {
-    return renderSessionTimeCell(ctx.transcript, Date.now());
+    return renderSessionTimeCell(ctx.transcript, ctx.stdin, Date.now());
   }
 };
 
@@ -2790,7 +2780,7 @@ function isVisible(w, config) {
     case "sessionTime":
     case "tokensPerSec":
     case "errors":
-      return config.lineLayout === "compact";
+      return d.layout === "hush";
     case "tools":
       return d.showTools === true;
     case "agents":
